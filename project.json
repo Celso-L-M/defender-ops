@@ -1,0 +1,25 @@
+{
+  "overview": "A multi-cloud SecOps platform with automated remediation playbooks, threat intelligence enrichment, and compliance reporting across AWS, Azure, and GCP.",
+  "features": [
+    "Block IP, Isolate Resource, and Revoke IAM Credentials playbooks with dry-run mode",
+    "Threat intelligence enrichment using AbuseIPDB, VirusTotal, and MITRE ATT&CK",
+    "Known malicious IP auto-flagging from Emerging Threats blocklist",
+    "On-demand security reports (Security Posture, Compliance, Incident Summary, Threat Intel) with CSV export",
+    "Reports library page with download and email delivery configuration",
+    "OWASP-hardened backend with full audit trail and input validation",
+    "Real-time dashboard with risk score gauge, provider cards, correlated incidents, and quick actions"
+  ],
+  "category": "security-dashboard",
+  "tags": [
+    "secops",
+    "multi-cloud",
+    "aws",
+    "azure",
+    "gcp",
+    "threat-intelligence",
+    "compliance",
+    "incident-response",
+    "remediation"
+  ],
+  "last_updated": "2026-05-28T23:16:38.878Z"
+}

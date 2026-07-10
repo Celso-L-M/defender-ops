@@ -1,0 +1,691 @@
+type http_request_result = 
+ record {
+   body: blob;
+   headers: vec http_header;
+   status: nat;
+ };
+type http_header = 
+ record {
+   name: text;
+   value: text;
+ };
+type TransformationOutput = 
+ record {
+   body: blob;
+   headers: vec http_header;
+   status: nat;
+ };
+type TransformationInput = 
+ record {
+   context: blob;
+   response: http_request_result;
+ };
+type TimelineEvent = 
+ record {
+   customer: text;
+   description: text;
+   eventType: text;
+   id: text;
+   provider: opt ProviderType;
+   severity: opt Severity;
+   timestamp: int;
+   title: text;
+ };
+type Severity = 
+ variant {
+   Critical;
+   High;
+   Low;
+   Medium;
+   Unknown;
+ };
+type SearchResult = 
+ record {
+   customer: text;
+   description: text;
+   id: text;
+   provider: opt ProviderType;
+   severity: opt Severity;
+   sourceModule: text;
+   timestamp: int;
+   title: text;
+ };
+type RuleSeverityThreshold = 
+ variant {
+   All;
+   AnyCritical;
+   AnyHigh;
+   AnyLow;
+   AnyMedium;
+   CriticalOrHigh;
+ };
+type Result_1 = 
+ variant {
+   err: text;
+   ok: text;
+ };
+type Result = 
+ variant {
+   err: text;
+   ok: record {
+         csvData: text;
+         reportId: text;
+       };
+ };
+type RawFinding = 
+ record {
+   accountId: opt text;
+   description: text;
+   findingId: text;
+   id: text;
+   provider: ProviderType;
+   rawMetadata: text;
+   region: opt text;
+   severity: Severity;
+   timestamp: int;
+   title: text;
+ };
+type ProviderType = 
+ variant {
+   AWS;
+   Azure;
+   GCP;
+ };
+type ProviderPollingState = 
+ record {
+   consecutiveFailures: nat;
+   findingsToday: nat;
+   interval: PollingInterval;
+   lastError: opt text;
+   lastPollAttempt: opt int;
+   lastSuccessfulPoll: opt int;
+   provider: ProviderType;
+   status: PollingStatus;
+ };
+type PollingStatus = 
+ variant {
+   Active;
+   AuthPaused;
+   Error;
+   Inactive;
+ };
+type PollingInterval = 
+ variant {
+   FifteenMin;
+   FiveMin;
+   OneHour;
+   ThirtyMin;
+ };
+type PlaybookResult = 
+ record {
+   dryRunPreview: opt text;
+   message: text;
+   provider: opt ProviderType;
+   rawApiError: opt text;
+   success: bool;
+ };
+type NotificationStatus = 
+ variant {
+   Acknowledged;
+   Failed;
+   Sent;
+ };
+type NotificationLog = 
+ record {
+   acknowledged: bool;
+   acknowledgedAt: opt int;
+   alertId: text;
+   channel: NotificationChannel;
+   customer: text;
+   id: text;
+   recipient: text;
+   ruleId: text;
+   status: NotificationStatus;
+   timestamp: int;
+ };
+type NotificationChannel = 
+ variant {
+   Email;
+   InApp;
+   TeamsWebhook;
+ };
+type NormalizedAlert = 
+ record {
+   accountId: opt text;
+   assetId: opt text;
+   assetType: opt text;
+   customer: text;
+   description: text;
+   enrichment: opt AlertEnrichment;
+   findingId: text;
+   id: text;
+   ingestionSource: opt variant {
+                          Poll;
+                          Webhook;
+                        };
+   mitre: opt MitreTag;
+   originalSeverity: text;
+   owner: opt text;
+   provider: ProviderType;
+   rawFindingId: text;
+   recurrenceCount: nat;
+   region: opt text;
+   severity: Severity;
+   status: AlertStatus;
+   timestamp: int;
+   title: text;
+ };
+type MitreTag = 
+ record {
+   tactic: text;
+   technique: text;
+   techniqueId: text;
+ };
+type MitreDetail = 
+ record {
+   description: text;
+   mitigations: text;
+   tacticName: text;
+   techniqueName: text;
+ };
+type IpReputation = 
+ record {
+   abuseScore: nat;
+   country: text;
+   isp: text;
+   lastReported: text;
+   totalReports: nat;
+ };
+type IngestionStats = 
+ record {
+   activeProviders: nat;
+   providerStates: vec ProviderPollingState;
+   totalFindingsToday: nat;
+ };
+type IncidentStatus = 
+ variant {
+   Investigating;
+   Open;
+   Resolved;
+ };
+type GeneratedReport = 
+ record {
+   csvData: opt text;
+   customer: text;
+   dateRangeEnd: text;
+   dateRangeStart: text;
+   format: text;
+   generatedAt: text;
+   generatedBy: text;
+   providerScope: vec text;
+   reportId: text;
+   reportType: text;
+ };
+type GcpCredentials = 
+ record {
+   projectIds: vec text;
+   serviceAccountJson: text;
+ };
+type DomainRep = 
+ record {
+   cleanVotes: nat;
+   lastAnalysisDate: text;
+   maliciousVotes: nat;
+   suspiciousVotes: nat;
+ };
+type CredentialHealthStatus = 
+ record {
+   expiryNs: opt int;
+   health: CredentialHealth;
+   provider: text;
+ };
+type CredentialHealth = 
+ variant {
+   Authenticating;
+   Error: text;
+   Expired;
+   ExpiringSoon: text;
+   Valid;
+ };
+type CorrelationStats = 
+ record {
+   byType: vec record {
+                 text;
+                 nat;
+               };
+   totalAllTime: nat;
+   totalThisWeek: nat;
+   totalToday: nat;
+ };
+type CorrelatedIncident = 
+ record {
+   affectedResources: vec text;
+   assignedOwner: opt text;
+   correlationWindowMinutes: nat;
+   customer: text;
+   detectedAt: int;
+   incidentId: text;
+   incidentType: text;
+   notes: opt text;
+   severity: Severity;
+   sourceAlerts: vec text;
+   sourceIp: opt text;
+   sourceProviders: vec ProviderType;
+   status: IncidentStatus;
+   timeDeltaMinutes: float64;
+ };
+type ControlStatus = 
+ variant {
+   Failing;
+   NoCoverage;
+   Passing;
+ };
+type ConnectionTestResult = 
+ variant {
+   Failure: text;
+   Success: text;
+ };
+type ComplianceTrendEntry = 
+ record {
+   framework: ComplianceFramework;
+   passingControls: nat;
+   score: nat;
+   totalControls: nat;
+   weekTimestamp: int;
+ };
+type ComplianceFramework = 
+ variant {
+   CISAws;
+   CISAzure;
+   CISGCP;
+   ISO27001;
+   NISTCSF;
+   SOC2;
+ };
+type ComplianceControl = 
+ record {
+   controlId: text;
+   description: text;
+   failingFindings: nat;
+   framework: ComplianceFramework;
+   passingFindings: nat;
+   provider: opt ProviderType;
+   remediationGuidance: text;
+   status: ControlStatus;
+   title: text;
+ };
+type AzureCredentials = 
+ record {
+   clientId: text;
+   clientSecret: text;
+   subscriptionIds: vec text;
+   tenantId: text;
+ };
+type AwsCredentials = 
+ record {
+   externalId: opt text;
+   regions: vec text;
+   roleArn: text;
+ };
+type AuditLogEntry = 
+ record {
+   action: text;
+   actorId: text;
+   customer: text;
+   details: text;
+   id: text;
+   timestamp: int;
+ };
+type AssetType = 
+ variant {
+   AzureDatabase;
+   AzureStorage;
+   AzureVM;
+   EC2;
+   GCPCloudSQL;
+   GCPCompute;
+   GCPStorage;
+   Lambda;
+   Other;
+   RDS;
+   S3;
+ };
+type Asset = 
+ record {
+   accountId: text;
+   assetType: AssetType;
+   customer: text;
+   id: text;
+   lastSeen: int;
+   name: text;
+   openFindings: nat;
+   provider: ProviderType;
+   region: text;
+   riskScore: nat;
+   tags: vec record {
+               text;
+               text;
+             };
+ };
+type AlertStatus = 
+ variant {
+   InProgress;
+   Open;
+   Resolved;
+ };
+type AlertRule = 
+ record {
+   assetId: opt text;
+   channels: vec NotificationChannel;
+   cooldownMinutes: nat;
+   customer: text;
+   enabled: bool;
+   escalationMinutes: opt nat;
+   escalationRecipient: opt text;
+   findingType: opt text;
+   id: text;
+   name: text;
+   provider: opt ProviderType;
+   region: opt text;
+   severityThreshold: opt RuleSeverityThreshold;
+ };
+type AlertEnrichment = 
+ record {
+   domainRep: opt DomainRep;
+   enrichedAt: opt text;
+   ipReputation: opt IpReputation;
+   knownMaliciousIp: bool;
+   mitreDetail: opt MitreDetail;
+ };
+service : {
+  /// Acknowledge a notification log entry.
+  acknowledgeNotification: (logId: text) -> (bool);
+  /// Block an IP address across one or more cloud providers.
+  /// dryRun=true returns a preview without making any API calls.
+  blockIp: (req:
+   record {
+     customer: text;
+     dryRun: bool;
+     ip: text;
+     providers: vec ProviderType;
+   }) -> (PlaybookResult);
+  /// Delete an alert rule by ID.
+  deleteAlertRule: (id: text) -> (bool);
+  /// Delete a generated report by ID.
+  deleteReport: (reportId: text, customer: text) -> ();
+  /// Disable an Azure AD user account via Microsoft Graph API.
+  disableAzureAdAccount: (req:
+   record {
+     customer: text;
+     dryRun: bool;
+     userPrincipalName: text;
+   }) -> (PlaybookResult);
+  /// Trigger enrichment for a specific alert on demand.
+  enrichAlertPublic: (alertId: text, customer: text) -> (Result_1);
+  /// Escalate an alert to a full correlated incident and create a Halo ticket.
+  escalateToIncident: (req:
+   record {
+     alertId: text;
+     assignedOwner: opt text;
+     customer: text;
+     dryRun: bool;
+     notes: opt text;
+     severity: text;
+   }) -> (PlaybookResult);
+  /// Export compliance report as CSV text.
+  exportComplianceCsv: (framework: ComplianceFramework) -> (text) query;
+  /// Export compliance report as PDF blob.
+  exportCompliancePdf: (framework: ComplianceFramework) -> (blob) query;
+  /// Force a GCP IAM review for a project, flagging over-privileged bindings.
+  forceGcpIamReview: (req:
+   record {
+     customer: text;
+     dryRun: bool;
+     projectId: text;
+   }) -> (PlaybookResult);
+  /// Generate a report as CSV and store it.
+  generateReport: (req:
+   record {
+     customer: text;
+     dateRangeEnd: text;
+     dateRangeStart: text;
+     providerScope: vec text;
+     reportType: text;
+   }) -> (Result);
+  /// Find a single alert by its ID.
+  getAlertById: (id: text) -> (opt NormalizedAlert) query;
+  /// Return all alert rules for a given customer.
+  getAlertRules: (customer: text) -> (vec AlertRule) query;
+  /// Return normalized alerts whose id matches any entry in alertIds.
+  getAlertsForCorrelation: (alertIds: vec text) ->
+   (vec NormalizedAlert) query;
+  /// Find a single asset by its ID.
+  getAssetById: (id: text) -> (opt Asset) query;
+  /// Return all open/in-progress normalized alerts for a given asset.
+  getAssetFindings: (assetId: text) -> (vec NormalizedAlert) query;
+  /// Return assets matching the provided filter criteria.
+  getAssets: (filter:
+   record {
+     assetType: opt AssetType;
+     customer: text;
+     limit: nat;
+     minRiskScore: opt nat;
+     provider: opt ProviderType;
+     region: opt text;
+   }) -> (vec Asset) query;
+  /// Return audit log entries for a customer, sorted by timestamp descending.
+  getAuditLog: (customer: text, limit: nat) -> (vec AuditLogEntry) query;
+  /// Return controls that have status Failing or NoCoverage.
+  getComplianceControlGaps: (framework: ComplianceFramework) ->
+   (vec ComplianceControl) query;
+  /// Return compliance status for a framework, counting passing/failing findings per control.
+  getComplianceStatus: (framework: ComplianceFramework, provider:
+   opt ProviderType) ->
+   (record {
+      controls: vec ComplianceControl;
+      failing: nat;
+      passing: nat;
+      score: nat;
+      total: nat;
+    }) query;
+  /// Return compliance trend entries for a framework sorted by weekTimestamp ascending.
+  getComplianceTrend: (framework: ComplianceFramework) ->
+   (vec ComplianceTrendEntry) query;
+  /// Return a correlated incident by its incidentId, or null if not found.
+  getCorrelatedIncidentById: (id: text) -> (opt CorrelatedIncident) query;
+  /// Return the most recent `limit` correlated incidents sorted by detectedAt descending.
+  getCorrelatedIncidents: (limit: nat) ->
+   (vec record {
+          text;
+          CorrelatedIncident;
+        }) query;
+  /// Return aggregated correlation statistics for the dashboard panel.
+  getCorrelationStats: () -> (CorrelationStats) query;
+  /// Return the health status of each provider's credentials.
+  /// Checks in-memory token cache expiry; no network call.
+  getCredentialHealth: () -> (vec CredentialHealthStatus) query;
+  /// Return which enrichment keys are configured (booleans only — never the key values).
+  getEnrichmentKeys: () ->
+   (record {
+      abuseIpdbKeySet: bool;
+      virusTotalKeySet: bool;
+    });
+  /// Return failed ingestion records, optionally filtered by provider.
+  /// provider field is returned as Text to avoid Candid variant decoding issues on the frontend.
+  getFailedIngestions: (provider: opt ProviderType, limit: nat) ->
+   (vec
+     record {
+       errorMessage: text;
+       errorType: text;
+       id: text;
+       provider: text;
+       rawPayload: text;
+       status: text;
+       timestamp: int;
+     }) query;
+  /// Return aggregated ingestion statistics for the dashboard.
+  getIngestionStats: () -> (IngestionStats) query;
+  /// Return normalized alerts matching the provided filter criteria.
+  getNormalizedAlerts: (filter:
+   record {
+     customer: text;
+     limit: nat;
+     provider: opt ProviderType;
+     severity: opt Severity;
+     status: opt AlertStatus;
+   }) -> (vec NormalizedAlert) query;
+  /// Return notification logs for a customer, sorted by timestamp descending.
+  getNotificationLogs: (filter: record {
+                                  customer: text;
+                                  limit: nat;
+                                }) -> (vec NotificationLog) query;
+  /// Return per-provider pipeline health stats for the dashboard.
+  /// provider field is returned as Text to avoid Candid variant decoding issues on the frontend.
+  getPipelineHealth: () ->
+   (vec
+     record {
+       avgLatencyMs: float64;
+       failedIngestionCount: nat;
+       normalizationSuccessRate: float64;
+       pollEventsToday: nat;
+       provider: text;
+       webhookEventsToday: nat;
+     }) query;
+  /// Return per-provider polling state (status, last poll time, error info).
+  getProviderStates: () -> (vec ProviderPollingState) query;
+  /// Return paginated raw findings for a given provider.
+  /// limit: max items to return (default 100, max 500). offset: starting index.
+  getRawFindings: (provider: ProviderType, limit: nat, offset: nat) ->
+   (record {
+      hasMore: bool;
+      items: vec RawFinding;
+      totalCount: nat;
+    }) query;
+  /// Return the CSV data for a specific report.
+  getReportCsv: (reportId: text, customer: text) -> (opt text);
+  /// Return email configs for a customer.
+  getReportEmailConfig: (customer: text) ->
+   (vec record {
+          recipients: vec text;
+          reportType: text;
+        });
+  /// Return the list of generated reports for a customer (without CSV data).
+  getReports: (customer: text) -> (vec GeneratedReport);
+  /// Return recent timeline events for a customer, sorted by timestamp descending.
+  getTimeline: (customer: text, limit: nat) -> (vec TimelineEvent) query;
+  /// Return aggregated webhook statistics for the dashboard.
+  getWebhookStats: () ->
+   (record {
+      webhookEventsToday: nat;
+      webhookNormalizationRate: float64;
+    }) query;
+  /// Search across alerts, assets, and audit log.
+  /// maxResults: cap total results (default 100, max 500). hasMore indicates truncation.
+  globalSearch: ("query": text, customer: text, maxResults: nat) ->
+   (record {
+      hasMore: bool;
+      results: vec SearchResult;
+    }) query;
+  /// Returns true if credentials have been saved for at least one provider.
+  hasAdminCredentials: () -> (bool) query;
+  http_request: (request:
+   record {
+     body: blob;
+     headers: vec record {
+                    text;
+                    text;
+                  };
+     method: text;
+     url: text;
+   }) ->
+   (record {
+      body: blob;
+      headers: vec record {
+                     text;
+                     text;
+                   };
+      status_code: nat16;
+      streaming_strategy: opt null;
+      upgrade: opt bool;
+    }) query;
+  http_request_update: (request:
+   record {
+     body: blob;
+     headers: vec record {
+                    text;
+                    text;
+                  };
+     method: text;
+     url: text;
+   }) ->
+   (record {
+      body: blob;
+      headers: vec record {
+                     text;
+                     text;
+                   };
+      status_code: nat16;
+      streaming_strategy: opt null;
+      upgrade: opt bool;
+    });
+  /// Isolate a resource by modifying its network configuration.
+  isolateResource: (req:
+   record {
+     customer: text;
+     dryRun: bool;
+     provider: ProviderType;
+     resourceId: text;
+   }) -> (PlaybookResult);
+  /// Revoke IAM credentials for a user/service account across providers.
+  revokeIamCredentials: (req:
+   record {
+     accessKeyId: opt text;
+     customer: text;
+     dryRun: bool;
+     provider: ProviderType;
+     userId: text;
+   }) -> (PlaybookResult);
+  /// Insert or update an alert rule.
+  saveAlertRule: (rule: AlertRule) -> (bool);
+  /// Store AWS credentials (role ARN + optional external ID + regions) in the canister.
+  saveAwsCredentials: (creds: AwsCredentials) -> ();
+  /// Store Azure credentials (client ID/secret/tenant + subscriptions) in the canister.
+  saveAzureCredentials: (creds: AzureCredentials) -> ();
+  /// Save enrichment API keys (AbuseIPDB and VirusTotal).
+  /// Key values are never returned to the frontend.
+  saveEnrichmentKeys: (keys:
+   record {
+     abuseIpdbKey: opt text;
+     virusTotalKey: opt text;
+   }) -> ();
+  /// Store GCP credentials (service account JSON + project IDs) in the canister.
+  saveGcpCredentials: (creds: GcpCredentials) -> ();
+  /// Save (upsert) a report email configuration.
+  saveReportEmailConfig: (config:
+   record {
+     customer: text;
+     recipients: vec text;
+     reportType: text;
+   }) -> ();
+  /// Seed 4 mock normalized alerts (idempotent) and run the correlation engine.
+  /// Returns the newly detected correlated incidents. Gated behind auth.
+  seedMockAlertsAndRunCorrelation: () -> (vec CorrelatedIncident);
+  /// Update the polling interval for a specific provider.
+  setPollingInterval: (provider: ProviderType, interval: PollingInterval) ->
+   ();
+  /// Validate stored AWS credentials against the live API.
+  testAwsConnection: () -> (ConnectionTestResult);
+  /// Validate stored Azure credentials against the live API.
+  testAzureConnection: () -> (ConnectionTestResult);
+  /// Validate stored GCP credentials against the live API.
+  testGcpConnection: () -> (ConnectionTestResult);
+  transform: (input: TransformationInput) -> (TransformationOutput) query;
+  /// Trigger an immediate poll for the specified provider.
+  triggerPoll: (provider: ProviderType) -> ();
+  /// Update the status and optional owner of an alert.
+  updateAlertStatus: (id: text, newStatus: AlertStatus, owner: opt text) ->
+   (bool);
+  /// Update status, owner, and/or notes on a correlated incident. Returns true if found.
+  updateCorrelatedIncidentStatus: (id: text, newStatus: IncidentStatus,
+   owner: opt text, notes: opt text) -> (bool);
+}
