@@ -1,3 +1,19 @@
+type VaultSecretName = text;
+type VaultError = 
+ variant {
+   AlreadyExists;
+   InvalidName;
+   NotAuthorized;
+   NotFound;
+ };
+type VaultEntryView = 
+ record {
+   createdAt: int;
+   maskedValue: text;
+   name: VaultSecretName;
+   provider: ProviderType;
+   updatedAt: int;
+ };
 type Value = 
  variant {
    "bool": bool;
@@ -67,18 +83,28 @@ type Result__1 =
    hasMore: bool;
    rows: vec vec Cell;
  };
-type Result_1 = 
+type Result_3 = 
  variant {
    err: text;
    ok: text;
  };
-type Result = 
+type Result_2 = 
  variant {
    err: text;
    ok: record {
          csvData: text;
          reportId: text;
        };
+ };
+type Result_1 = 
+ variant {
+   err: VaultError;
+   ok: text;
+ };
+type Result = 
+ variant {
+   err: VaultError;
+   ok;
  };
 type RawFinding = 
  record {
@@ -240,11 +266,6 @@ type GeneratedReport =
    reportId: text;
    reportType: text;
  };
-type GcpCredentials = 
- record {
-   projectIds: vec text;
-   serviceAccountJson: text;
- };
 type DomainRep = 
  record {
    cleanVotes: nat;
@@ -338,19 +359,6 @@ type Cell =
    name: text;
    value: Value;
  };
-type AzureCredentials = 
- record {
-   clientId: text;
-   clientSecret: text;
-   subscriptionIds: vec text;
-   tenantId: text;
- };
-type AwsCredentials = 
- record {
-   externalId: opt text;
-   regions: vec text;
-   roleArn: text;
- };
 type AuditLogEntry = 
  record {
    action: text;
@@ -442,6 +450,10 @@ service : {
   deleteAlertRule: (id: text) -> (bool);
   /// Delete a generated report by ID.
   deleteReport: (reportId: text, customer: text) -> ();
+  /// Delete a named secret for a provider. Composes requireAuth and
+  /// writes an audit entry.
+  deleteVaultSecret: (provider: ProviderType, name: VaultSecretName) ->
+   (Result);
   /// Disable an Azure AD user account via Microsoft Graph API.
   disableAzureAdAccount: (req:
    record {
@@ -450,7 +462,7 @@ service : {
      userPrincipalName: text;
    }) -> (PlaybookResult);
   /// Trigger enrichment for a specific alert on demand.
-  enrichAlertPublic: (alertId: text, customer: text) -> (Result_1);
+  enrichAlertPublic: (alertId: text, customer: text) -> (Result_3);
   /// Escalate an alert to a full correlated incident and create a Halo ticket.
   escalateToIncident: (req:
    record {
@@ -481,7 +493,7 @@ service : {
      dateRangeStart: text;
      providerScope: vec text;
      reportType: text;
-   }) -> (Result);
+   }) -> (Result_2);
   /// Find a single alert by its ID.
   /// Requires the caller to be assigned to the alert's provider.
   getAlertById: (id: text) -> (opt NormalizedAlert) query;
@@ -698,9 +710,16 @@ service : {
    }) -> (PlaybookResult);
   /// Admin: list all users and their provider assignments.
   listUserAssignments: () -> (vec UserAssignmentView) query;
+  /// List all vault entries for a provider as masked views (never plaintext).
+  /// Composes requireAuth.
+  listVaultSecrets: (provider: ProviderType) -> (vec VaultEntryView) query;
   /// Admin: remove a single provider from a principal's access.
   removeProviderAccess: ("principal": principal, provider: ProviderType) ->
    ();
+  /// Reveal/decrypt a single secret value on demand. Composes
+  /// requireAuth and writes an audit entry recording the reveal.
+  revealVaultSecret: (provider: ProviderType, name: VaultSecretName) ->
+   (Result_1);
   /// Revoke IAM credentials for a user/service account across providers.
   revokeIamCredentials: (req:
    record {
@@ -712,10 +731,6 @@ service : {
    }) -> (PlaybookResult);
   /// Insert or update an alert rule.
   saveAlertRule: (rule: AlertRule) -> (bool);
-  /// Store AWS credentials (role ARN + optional external ID + regions) in the canister.
-  saveAwsCredentials: (creds: AwsCredentials) -> ();
-  /// Store Azure credentials (client ID/secret/tenant + subscriptions) in the canister.
-  saveAzureCredentials: (creds: AzureCredentials) -> ();
   /// Save enrichment API keys (AbuseIPDB and VirusTotal).
   /// Key values are never returned to the frontend.
   saveEnrichmentKeys: (keys:
@@ -723,8 +738,6 @@ service : {
      abuseIpdbKey: opt text;
      virusTotalKey: opt text;
    }) -> ();
-  /// Store GCP credentials (service account JSON + project IDs) in the canister.
-  saveGcpCredentials: (creds: GcpCredentials) -> ();
   /// Save (upsert) a report email configuration.
   saveReportEmailConfig: (config:
    record {
@@ -732,13 +745,14 @@ service : {
      recipients: vec text;
      reportType: text;
    }) -> ();
+  /// Store a new named secret for a provider. Encrypted at rest; the value is
+  /// never returned. Composes requireAuth and writes an audit entry.
+  saveVaultSecret: (provider: ProviderType, name: VaultSecretName, value:
+   text) -> (Result);
   /// Save the webhook signature secret for a provider.
   /// The secret value is stored write-only and is never returned to the frontend.
   saveWebhookSecret: (provider: ProviderType, secret: text) -> ();
   schema: () -> (text) query;
-  /// Seed 4 mock normalized alerts (idempotent) and run the correlation engine.
-  /// Returns the newly detected correlated incidents. Gated behind auth.
-  seedMockAlertsAndRunCorrelation: () -> (vec CorrelatedIncident);
   /// Update the polling interval for a specific provider.
   setPollingInterval: (provider: ProviderType, interval: PollingInterval) ->
    ();
@@ -757,4 +771,8 @@ service : {
   /// Update status, owner, and/or notes on a correlated incident. Returns true if found.
   updateCorrelatedIncidentStatus: (id: text, newStatus: IncidentStatus,
    owner: opt text, notes: opt text) -> (bool);
+  /// Update an existing named secret for a provider. Composes
+  /// requireAuth and writes an audit entry.
+  updateVaultSecret: (provider: ProviderType, name: VaultSecretName, value:
+   text) -> (Result);
 }

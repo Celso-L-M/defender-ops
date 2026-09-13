@@ -68,6 +68,12 @@
     --gcp-foreground: 0.98 0.01 160;
     --gcp-soft: 0.94 0.03 160;
 
+    /* Vault — secure-secret accent, distinct from the connected-cyan primary */
+    --vault: 0.6 0.11 250;
+    --vault-foreground: 0.98 0.01 250;
+    --vault-soft: 0.93 0.03 250;
+    --vault-border: 0.55 0.08 250;
+
     --sidebar: 0.98 0 0;
     --sidebar-foreground: 0.15 0 0;
     --sidebar-primary: 0.35 0 0;
@@ -119,6 +125,12 @@
     --gcp: 0.68 0.16 160;
     --gcp-foreground: 0.13 0.02 160;
     --gcp-soft: 0.19 0.04 160;
+
+    /* Vault — cool steel accent, reads "encrypted/locked" in dark mode */
+    --vault: 0.68 0.1 250;
+    --vault-foreground: 0.13 0.02 250;
+    --vault-soft: 0.2 0.04 250;
+    --vault-border: 0.62 0.09 250;
 
     --sidebar: 0.14 0 0;
     --sidebar-foreground: 0.96 0 0;
@@ -206,6 +218,82 @@
     color: var(--provider-accent, oklch(var(--primary)));
     border-left: 3px solid var(--provider-accent, oklch(var(--primary)));
   }
+
+  /* Vault shell: cool steel top bar + tinted surface, reads "encrypted"
+     and distinct from provider shells. Provider pages keep their accent. */
+  .vault-shell {
+    position: relative;
+    border: 1px solid oklch(var(--vault-border) / 0.5);
+    border-radius: var(--radius);
+    background: oklch(var(--vault-soft) / 0.35);
+    overflow: hidden;
+  }
+
+  .vault-shell::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 3px;
+    background: oklch(var(--vault));
+  }
+
+  /* Masked secret: dot-masked value that never renders in plaintext.
+     Reveal swaps the mask for the live value via .secret-revealed. */
+  .secret-masked {
+    font-family: var(--font-mono);
+    letter-spacing: 0.18em;
+    color: oklch(var(--vault));
+    user-select: none;
+  }
+
+  .secret-revealed {
+    font-family: var(--font-mono);
+    letter-spacing: 0;
+    color: oklch(var(--foreground));
+    word-break: break-all;
+  }
+
+  /* Reveal-on-demand affordance: a quiet button that reads as "unlock" */
+  .secret-reveal-toggle {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: oklch(var(--vault));
+    border: 1px solid oklch(var(--vault-border) / 0.5);
+    border-radius: 0.25rem;
+    padding: 0.2rem 0.5rem;
+    background: transparent;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .secret-reveal-toggle:hover {
+    background: oklch(var(--vault) / 0.15);
+    border-color: oklch(var(--vault));
+  }
+
+  /* Audit/access-control cue: locked icon tint used for entry-level badges */
+  .badge-vault {
+    background-color: oklch(var(--vault-soft) / 0.6);
+    border: 1px solid oklch(var(--vault-border) / 0.6);
+    color: oklch(var(--vault));
+    border-radius: 0.25rem;
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    font-family: var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.025em;
+  }
+
+  .vault-accent {
+    color: oklch(var(--vault));
+  }
+
+  .vault-accent-bar {
+    background: oklch(var(--vault));
+  }
 }
 
 @theme {
@@ -223,6 +311,11 @@
   --color-gcp: oklch(var(--gcp));
   --color-gcp-foreground: oklch(var(--gcp-foreground));
   --color-gcp-soft: oklch(var(--gcp-soft));
+
+  --color-vault: oklch(var(--vault));
+  --color-vault-foreground: oklch(var(--vault-foreground));
+  --color-vault-soft: oklch(var(--vault-soft));
+  --color-vault-border: oklch(var(--vault-border));
 }
 
 .badge-status-connected {

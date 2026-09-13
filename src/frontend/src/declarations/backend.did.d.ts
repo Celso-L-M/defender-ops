@@ -67,17 +67,6 @@ export interface AuditLogEntry {
   'timestamp' : bigint,
   'details' : string,
 }
-export interface AwsCredentials {
-  'externalId' : [] | [string],
-  'roleArn' : string,
-  'regions' : Array<string>,
-}
-export interface AzureCredentials {
-  'clientId' : string,
-  'subscriptionIds' : Array<string>,
-  'tenantId' : string,
-  'clientSecret' : string,
-}
 export interface Cell { 'value' : Value, 'name' : string }
 export interface ComplianceControl {
   'status' : ControlStatus,
@@ -145,10 +134,6 @@ export interface DomainRep {
   'maliciousVotes' : bigint,
   'cleanVotes' : bigint,
   'lastAnalysisDate' : string,
-}
-export interface GcpCredentials {
-  'serviceAccountJson' : string,
-  'projectIds' : Array<string>,
 }
 export interface GeneratedReport {
   'csvData' : [] | [string],
@@ -274,9 +259,13 @@ export interface RawFinding {
   'timestamp' : bigint,
   'severity' : Severity,
 }
-export type Result = { 'ok' : { 'csvData' : string, 'reportId' : string } } |
-  { 'err' : string };
+export type Result = { 'ok' : null } |
+  { 'err' : VaultError };
 export type Result_1 = { 'ok' : string } |
+  { 'err' : VaultError };
+export type Result_2 = { 'ok' : { 'csvData' : string, 'reportId' : string } } |
+  { 'err' : string };
+export type Result_3 = { 'ok' : string } |
   { 'err' : string };
 export interface Result__1 { 'hasMore' : boolean, 'rows' : Array<Array<Cell>> }
 export type RuleSeverityThreshold = { 'All' : null } |
@@ -329,6 +318,18 @@ export type Value = { 'int' : bigint } |
   { 'bool' : boolean } |
   { 'null' : null } |
   { 'text' : string };
+export interface VaultEntryView {
+  'provider' : ProviderType,
+  'name' : VaultSecretName,
+  'createdAt' : bigint,
+  'updatedAt' : bigint,
+  'maskedValue' : string,
+}
+export type VaultError = { 'NotFound' : null } |
+  { 'NotAuthorized' : null } |
+  { 'AlreadyExists' : null } |
+  { 'InvalidName' : null };
+export type VaultSecretName = string;
 export interface _SERVICE {
   /**
    * / Acknowledge a notification log entry.
@@ -367,6 +368,11 @@ export interface _SERVICE {
    */
   'deleteReport' : ActorMethod<[string, string], undefined>,
   /**
+   * / Delete a named secret for a provider. Composes requireAuth and
+   * / writes an audit entry.
+   */
+  'deleteVaultSecret' : ActorMethod<[ProviderType, VaultSecretName], Result>,
+  /**
    * / Disable an Azure AD user account via Microsoft Graph API.
    */
   'disableAzureAdAccount' : ActorMethod<
@@ -376,7 +382,7 @@ export interface _SERVICE {
   /**
    * / Trigger enrichment for a specific alert on demand.
    */
-  'enrichAlertPublic' : ActorMethod<[string, string], Result_1>,
+  'enrichAlertPublic' : ActorMethod<[string, string], Result_3>,
   /**
    * / Escalate an alert to a full correlated incident and create a Halo ticket.
    */
@@ -422,7 +428,7 @@ export interface _SERVICE {
         'reportType' : string,
       },
     ],
-    Result
+    Result_2
   >,
   /**
    * / Find a single alert by its ID.
@@ -720,9 +726,19 @@ export interface _SERVICE {
    */
   'listUserAssignments' : ActorMethod<[], Array<UserAssignmentView>>,
   /**
+   * / List all vault entries for a provider as masked views (never plaintext).
+   * / Composes requireAuth.
+   */
+  'listVaultSecrets' : ActorMethod<[ProviderType], Array<VaultEntryView>>,
+  /**
    * / Admin: remove a single provider from a principal's access.
    */
   'removeProviderAccess' : ActorMethod<[Principal, ProviderType], undefined>,
+  /**
+   * / Reveal/decrypt a single secret value on demand. Composes
+   * / requireAuth and writes an audit entry recording the reveal.
+   */
+  'revealVaultSecret' : ActorMethod<[ProviderType, VaultSecretName], Result_1>,
   /**
    * / Revoke IAM credentials for a user/service account across providers.
    */
@@ -743,14 +759,6 @@ export interface _SERVICE {
    */
   'saveAlertRule' : ActorMethod<[AlertRule], boolean>,
   /**
-   * / Store AWS credentials (role ARN + optional external ID + regions) in the canister.
-   */
-  'saveAwsCredentials' : ActorMethod<[AwsCredentials], undefined>,
-  /**
-   * / Store Azure credentials (client ID/secret/tenant + subscriptions) in the canister.
-   */
-  'saveAzureCredentials' : ActorMethod<[AzureCredentials], undefined>,
-  /**
    * / Save enrichment API keys (AbuseIPDB and VirusTotal).
    * / Key values are never returned to the frontend.
    */
@@ -758,10 +766,6 @@ export interface _SERVICE {
     [{ 'virusTotalKey' : [] | [string], 'abuseIpdbKey' : [] | [string] }],
     undefined
   >,
-  /**
-   * / Store GCP credentials (service account JSON + project IDs) in the canister.
-   */
-  'saveGcpCredentials' : ActorMethod<[GcpCredentials], undefined>,
   /**
    * / Save (upsert) a report email configuration.
    */
@@ -776,19 +780,19 @@ export interface _SERVICE {
     undefined
   >,
   /**
+   * / Store a new named secret for a provider. Encrypted at rest; the value is
+   * / never returned. Composes requireAuth and writes an audit entry.
+   */
+  'saveVaultSecret' : ActorMethod<
+    [ProviderType, VaultSecretName, string],
+    Result
+  >,
+  /**
    * / Save the webhook signature secret for a provider.
    * / The secret value is stored write-only and is never returned to the frontend.
    */
   'saveWebhookSecret' : ActorMethod<[ProviderType, string], undefined>,
   'schema' : ActorMethod<[], string>,
-  /**
-   * / Seed 4 mock normalized alerts (idempotent) and run the correlation engine.
-   * / Returns the newly detected correlated incidents. Gated behind auth.
-   */
-  'seedMockAlertsAndRunCorrelation' : ActorMethod<
-    [],
-    Array<CorrelatedIncident>
-  >,
   /**
    * / Update the polling interval for a specific provider.
    */
@@ -826,6 +830,14 @@ export interface _SERVICE {
   'updateCorrelatedIncidentStatus' : ActorMethod<
     [string, IncidentStatus, [] | [string], [] | [string]],
     boolean
+  >,
+  /**
+   * / Update an existing named secret for a provider. Composes
+   * / requireAuth and writes an audit entry.
+   */
+  'updateVaultSecret' : ActorMethod<
+    [ProviderType, VaultSecretName, string],
+    Result
   >,
 }
 export declare const idlService: IDL.ServiceClass;

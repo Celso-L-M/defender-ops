@@ -38,6 +38,8 @@ import Iter "mo:core/Iter";
 import ApiDocMixin "mixins/api-doc";
 import PerProviderAccessControlApi "mixins/per-provider-access-control-api";
 import PerProviderAccessControl "lib/per-provider-access-control";
+import VaultApi "mixins/vault-api";
+import VaultTypes "types/vault";
 
 actor {
 
@@ -107,6 +109,12 @@ actor {
   // Maps each principal to the set of cloud providers they are assigned to.
   // Users may only view and act on providers present in their list.
   var providerAssignments : Map.Map<Principal, [Types.ProviderType]>;
+
+  // ── Centralized secure vault (stable, initialised by migration chain) ─────
+  // Per-provider named secrets, encrypted at rest. `entries` maps each
+  // (provider, name) pair to its encrypted entry; `key` is the SHA-256
+  // encryption key seeded from raw_rand on the first vault write.
+  let vaultState : VaultTypes.VaultState;
 
   // ── In-memory token caches (NOT stable — discarded on restart) ────────────
   // Short-lived tokens are never written to stable memory per least-privilege policy
@@ -596,31 +604,22 @@ actor {
     };
   };
 
+  /// Returns true when the caller is the canister owner (SYS_ADMIN / canister
+  /// controller). The owner is granted access to every provider's vault
+  /// regardless of per-provider assignment, so they can set up and manage
+  /// secrets for all providers even before any `assignProviderAccess` is issued.
+  func isOwner(caller : Principal) : Bool {
+    caller.isController()
+  };
+
   // ── Credential Management ────────────────────────────────────────────────
 
-  /// Store AWS credentials (role ARN + optional external ID + regions) in the canister.
-  public shared ({ caller }) func saveAwsCredentials(creds : Types.AwsCredentials) : async () {
-    requireAuth(caller, "saveAwsCredentials");
-    awsCredentials := ?creds;
-    awsSessionCache := null; // invalidate cached token on credential change
-    addAuditEntry(caller.toText(), "CredentialSaved", "AWS credentials updated (roleArn redacted)", "");
-  };
-
-  /// Store Azure credentials (client ID/secret/tenant + subscriptions) in the canister.
-  public shared ({ caller }) func saveAzureCredentials(creds : Types.AzureCredentials) : async () {
-    requireAuth(caller, "saveAzureCredentials");
-    azureCredentials := ?creds;
-    azureTokenCache := null; // invalidate cached token on credential change
-    addAuditEntry(caller.toText(), "CredentialSaved", "Azure credentials updated (clientId=" # creds.clientId # ", secret redacted)", "");
-  };
-
-  /// Store GCP credentials (service account JSON + project IDs) in the canister.
-  public shared ({ caller }) func saveGcpCredentials(creds : Types.GcpCredentials) : async () {
-    requireAuth(caller, "saveGcpCredentials");
-    gcpCredentials := ?creds;
-    gcpTokenCache := null; // invalidate cached token on credential change
-    addAuditEntry(caller.toText(), "CredentialSaved", "GCP credentials updated (serviceAccountJson redacted)", "");
-  };
+  // The legacy per-provider credential forms (saveAwsCredentials /
+  // saveAzureCredentials / saveGcpCredentials) have been replaced by the
+  // centralized secure vault (saveVaultSecret / updateVaultSecret /
+  // deleteVaultSecret / listVaultSecrets / revealVaultSecret). The stable
+  // awsCredentials / azureCredentials / gcpCredentials vars remain for the
+  // polling/ingestion pipeline, which still reads them.
 
   // ── Polling State & Stats ─────────────────────────────────────────────────
 
@@ -1705,138 +1704,6 @@ actor {
     CorrelationEngine.computeStats(scoped, Time.now());
   };
 
-  /// Seed 4 mock normalized alerts (idempotent) and run the correlation engine.
-  /// Returns the newly detected correlated incidents. Gated behind auth.
-  public shared ({ caller }) func seedMockAlertsAndRunCorrelation() : async [Types.CorrelatedIncident] {
-    requireAuth(caller, "seedMockAlertsAndRunCorrelation");
-    let nowNs = Time.now();
-    let mockAlerts : [(Text, Types.NormalizedAlert)] = [
-      (
-        "mock-azure-brute-1",
-        {
-          id               = "mock-azure-brute-1";
-          provider         = #Azure;
-          findingId        = "mock-azure-brute-1";
-          originalSeverity = "High";
-          severity         = #High;
-          title            = "AzureAD/BruteForce";
-          description      = "Brute force attack against Azure AD PasswordSpray credential stuffing";
-          assetId          = ?"185.234.219.10";
-          assetType        = null;
-          accountId        = ?"azure-sub-mock";
-          region           = ?"eastus";
-          timestamp        = nowNs - 3_600_000_000_000;
-          status           = #Open;
-          owner            = ?"";
-          customer         = "";
-          mitre            = ?{ tactic = "Credential Access"; technique = ""; techniqueId = "" };
-          rawFindingId     = "mock-azure-brute-1";
-          recurrenceCount  = 0;
-          ingestionSource  = null;
-          enrichment       = null;
-        }
-      ),
-      (
-        "mock-aws-assume-2",
-        {
-          id               = "mock-aws-assume-2";
-          provider         = #AWS;
-          findingId        = "mock-aws-assume-2";
-          originalSeverity = "High";
-          severity         = #High;
-          title            = "UnauthorizedAccess:IAMUser/AssumeRole";
-          description      = "Unauthorized AssumeRole attempt IAM privilege escalation";
-          assetId          = ?"185.234.219.10";
-          assetType        = null;
-          accountId        = ?"aws-acct-mock";
-          region           = ?"us-east-1";
-          timestamp        = nowNs - 3_600_000_000_000 + 1_080_000_000_000;
-          status           = #Open;
-          owner            = ?"";
-          customer         = "";
-          mitre            = ?{ tactic = "Privilege Escalation"; technique = ""; techniqueId = "" };
-          rawFindingId     = "mock-aws-assume-2";
-          recurrenceCount  = 0;
-          ingestionSource  = null;
-          enrichment       = null;
-        }
-      ),
-      (
-        "mock-aws-s3-3",
-        {
-          id               = "mock-aws-s3-3";
-          provider         = #AWS;
-          findingId        = "mock-aws-s3-3";
-          originalSeverity = "Critical";
-          severity         = #Critical;
-          title            = "Exfiltration:S3/ObjectRead.Unusual";
-          description      = "S3 GetObject anomaly unusual data Download exfiltration from bucket";
-          assetId          = ?"s3://prod-data-bucket";
-          assetType        = null;
-          accountId        = ?"aws-acct-mock";
-          region           = ?"us-east-1";
-          timestamp        = nowNs - 7_200_000_000_000;
-          status           = #Open;
-          owner            = ?"";
-          customer         = "";
-          mitre            = ?{ tactic = "Exfiltration"; technique = ""; techniqueId = "" };
-          rawFindingId     = "mock-aws-s3-3";
-          recurrenceCount  = 0;
-          ingestionSource  = null;
-          enrichment       = null;
-        }
-      ),
-      (
-        "mock-azure-blob-4",
-        {
-          id               = "mock-azure-blob-4";
-          provider         = #Azure;
-          findingId        = "mock-azure-blob-4";
-          originalSeverity = "High";
-          severity         = #High;
-          title            = "StorageAccount.BlobAnomaly.Download";
-          description      = "BlobStorage StorageAccount Download anomaly suspicious data access";
-          assetId          = ?"prodstorageaccount/exports";
-          assetType        = null;
-          accountId        = ?"azure-sub-mock";
-          region           = ?"westeurope";
-          timestamp        = nowNs - 7_200_000_000_000 + 480_000_000_000;
-          status           = #Open;
-          owner            = ?"";
-          customer         = "";
-          mitre            = ?{ tactic = "Exfiltration"; technique = ""; techniqueId = "" };
-          rawFindingId     = "mock-azure-blob-4";
-          recurrenceCount  = 0;
-          ingestionSource  = null;
-          enrichment       = null;
-        }
-      ),
-    ];
-
-    // Add only mock alerts not already present (check by id)
-    for ((mockId, mockAlert) in mockAlerts.vals()) {
-      let existing = normalizedAlerts.toArray().find(
-        func((id, _)) { Text.equal(id, mockId) }
-      );
-      switch (existing) {
-        case (null) { normalizedAlerts.add((mockId, mockAlert)) };
-        case (?_)   {};
-      };
-    };
-
-    // Snapshot existing incidents count before running engine
-    let beforeCount = correlatedIncidents.size();
-    runCorrelationEngine();
-
-    // Return only the newly created incidents
-    let allAfter = correlatedIncidents;
-    let newOnes = allAfter.filter(
-      func((_, inc)) { inc.detectedAt >= nowNs }
-    );
-    ignore beforeCount;
-    newOnes.map(func((_, inc)) { inc });
-  };
-
   /// Return normalized alerts whose id matches any entry in alertIds.
   /// Scoped to the providers the caller is assigned to.
   public shared query ({ caller }) func getAlertsForCorrelation(alertIds : [Text]) : async [Types.NormalizedAlert] {
@@ -2907,10 +2774,33 @@ actor {
         .payload("provider", func ((_, pr)) = pr)
         .controllerOnly()
         .build(),
+
+      // Vault entries — exposes ONLY non-sensitive metadata (provider, name,
+      // createdAt, updatedAt, maskedValue). The encrypted ciphertext, nonce,
+      // and any plaintext secret are deliberately NOT exposed, consistent with
+      // the app's security posture that secrets are never surfaced.
+      Entity.manual<((Types.ProviderType, VaultTypes.VaultSecretName), VaultTypes.VaultEntry)>(
+        "vaultEntry",
+        func () : Iter.Iter<((Types.ProviderType, VaultTypes.VaultSecretName), VaultTypes.VaultEntry)> {
+          vaultState.entries.entries()
+        },
+        "VaultEntry",
+        "name"
+      )
+        .sample(((#AWS : Types.ProviderType, ""), { provider = (#AWS : Types.ProviderType); name = ""; ciphertext = "\00".encodeUtf8(); nonce = "\00".encodeUtf8(); createdAt = 0; updatedAt = 0 }))
+        .payload("provider", func (((p, _), _)) = switch (p) { case (#AWS) "AWS"; case (#Azure) "Azure"; case (#GCP) "GCP"; })
+        .payload("name", func (((_, n), _)) = n)
+        .payload("createdAt", func ((_, e)) = e.createdAt)
+        .payload("updatedAt", func ((_, e)) = e.updatedAt)
+        .payload("maskedValue", func (_) = "••••••••")
+        .controllerOnly()
+        .build(),
     ];
   });
 
   include PerProviderAccessControlApi(providerAssignments, requireAuth);
+
+  include VaultApi(vaultState, requireAuth, requireProviderAccess, isOwner, addAuditEntry);
 
   include ApiDocMixin();
 

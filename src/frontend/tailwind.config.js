@@ -81,6 +81,12 @@ export default {
           foreground: "oklch(var(--gcp-foreground))",
           soft: "oklch(var(--gcp-soft) / <alpha-value>)",
         },
+        vault: {
+          DEFAULT: "oklch(var(--vault) / <alpha-value>)",
+          foreground: "oklch(var(--vault-foreground))",
+          soft: "oklch(var(--vault-soft) / <alpha-value>)",
+          border: "oklch(var(--vault-border) / <alpha-value>)",
+        },
       },
       fontFamily: {
         display: ["var(--font-display)", "serif"],
@@ -109,11 +115,16 @@ export default {
           "0%, 100%": { opacity: "1" },
           "50%": { opacity: "0.4" },
         },
+        "secret-reveal": {
+          "0%": { filter: "blur(6px)", opacity: "0.4" },
+          "100%": { filter: "blur(0)", opacity: "1" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
         "provider-pulse": "provider-pulse 2s ease-in-out infinite",
+        "secret-reveal": "secret-reveal 0.25s ease-out",
       },
     },
   },

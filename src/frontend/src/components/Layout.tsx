@@ -13,6 +13,7 @@ import {
   GitMerge,
   LayoutDashboard,
   List,
+  Lock,
   LogIn,
   LogOut,
   RefreshCw,
@@ -333,12 +334,14 @@ export function Layout({ children }: Props) {
             ? "GCP Dashboard"
             : pathname.startsWith("/provider-access")
               ? "Provider Access"
-              : (navLinks.find((l) => pathname.startsWith(l.to))?.label ??
-                (pathname.startsWith("/failed-ingestions")
-                  ? "Failed Ingestions"
-                  : pathname.startsWith("/assets/")
-                    ? "Asset Inventory"
-                    : "Overview"));
+              : pathname.startsWith("/vault")
+                ? "Cloud Vault"
+                : (navLinks.find((l) => pathname.startsWith(l.to))?.label ??
+                  (pathname.startsWith("/failed-ingestions")
+                    ? "Failed Ingestions"
+                    : pathname.startsWith("/assets/")
+                      ? "Asset Inventory"
+                      : "Overview"));
 
   return (
     <ProviderFilterProvider>
@@ -518,6 +521,26 @@ export function Layout({ children }: Props) {
                   {!collapsed && (
                     <span className="truncate">Provider Access</span>
                   )}
+                </Link>
+                <Link
+                  to="/vault"
+                  data-ocid="nav.vault_link"
+                  className={`flex items-center gap-3 rounded-md px-2.5 py-2 text-sm font-medium transition-smooth group
+                    ${
+                      pathname.startsWith("/vault")
+                        ? "bg-primary/15 text-primary border border-primary/25"
+                        : "text-muted-foreground hover:bg-muted/40 hover:text-foreground border border-transparent"
+                    }`}
+                >
+                  <Lock
+                    size={16}
+                    className={`shrink-0 ${
+                      pathname.startsWith("/vault")
+                        ? "text-primary"
+                        : "text-muted-foreground group-hover:text-foreground"
+                    }`}
+                  />
+                  {!collapsed && <span className="truncate">Cloud Vault</span>}
                 </Link>
               </>
             )}

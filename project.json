@@ -1,17 +1,19 @@
 {
-  "overview": "Defender Ops is a multi-cloud SecOps platform that isolates AWS, Azure, and GCP into separate dashboards with per-provider access control so users only see and act on the providers they are assigned to.",
+  "overview": "Defender Ops is a multi-cloud SecOps platform for AWS, Azure, and GCP with a centralized per-provider secure vault for credentials, API keys, and secrets.",
   "features": [
-    "Dedicated AWS, Azure, and GCP dashboards showing only that provider's data",
-    "Provider overview landing page linking to each isolated dashboard",
-    "All data views scoped to the active provider to prevent cross-cloud leaks",
-    "Per-provider access control so users only see and act on assigned providers"
+    "Store arbitrary named secrets per cloud provider in a centralized vault",
+    "Encrypt secrets at rest in the backend canister",
+    "Allow authorized admins to reveal or decrypt secrets on demand",
+    "Enforce per-provider access control on vault operations",
+    "Record every vault action in the audit log"
   ],
-  "category": "productivity",
+  "category": "security-operations",
   "tags": [
     "security",
-    "multi-cloud",
-    "secops",
-    "dashboard"
+    "cloud",
+    "vault",
+    "secrets",
+    "secops"
   ],
-  "last_updated": "2026-09-13T01:28:14.728Z"
+  "last_updated": "2026-09-13T11:20:18.093Z"
 }

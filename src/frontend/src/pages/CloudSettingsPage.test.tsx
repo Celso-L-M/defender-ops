@@ -31,6 +31,7 @@ vi.mock("@tanstack/react-router", () => ({
 }));
 
 const useSaveWebhookSecretMock = vi.fn();
+const useSaveEnrichmentKeysMock = vi.fn();
 vi.mock("../hooks/use-backend", () => ({
   useProviderStates: () => ({
     data: [
@@ -74,7 +75,8 @@ vi.mock("../hooks/use-backend", () => ({
     data: { abuseIpdbKeySet: true, virusTotalKeySet: false },
     isLoading: false,
   }),
-  useSaveEnrichmentKeys: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useSaveEnrichmentKeys: (...args: unknown[]) =>
+    useSaveEnrichmentKeysMock(...args),
   useGetWebhookSecretStatus: () => ({
     data: { awsSet: true, azureSet: false, gcpSet: false },
     isLoading: false,
@@ -118,38 +120,44 @@ describe("CloudSettingsPage (characterize)", () => {
       mutateAsync: vi.fn(),
       isPending: false,
     });
+    useSaveEnrichmentKeysMock.mockReturnValue({
+      mutateAsync: vi.fn(),
+      isPending: false,
+    });
   });
 
-  it("renders the page title and all three provider sections", async () => {
+  it("renders the page title and the remaining settings sections", async () => {
     renderPage();
     expect(
       screen.getByRole("heading", { name: "Cloud Provider Settings" }),
     ).toBeInTheDocument();
-    expect(screen.getByTestId("settings.aws.section")).toBeInTheDocument();
-    expect(screen.getByTestId("settings.azure.section")).toBeInTheDocument();
-    expect(screen.getByTestId("settings.gcp.section")).toBeInTheDocument();
-  });
-
-  it("shows the provider status bar with AWS, Azure, and GCP entries", async () => {
-    renderPage();
-    const statusBar = screen.getByTestId("settings.status_bar");
-    expect(statusBar).toBeInTheDocument();
+    // The per-provider credential sections and status bar were replaced by the
+    // centralized vault; the ThreatIntel and WebhookSecret sections remain.
     expect(
-      screen.getByTestId("settings.provider_status.aws"),
+      screen.getByTestId("settings.threat_intel.section"),
     ).toBeInTheDocument();
     expect(
-      screen.getByTestId("settings.provider_status.azure"),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByTestId("settings.provider_status.gcp"),
+      screen.getByTestId("settings.webhook_secrets.section"),
     ).toBeInTheDocument();
   });
 
-  it("renders the AWS credentials form with role ARN and save button", async () => {
+  it("no longer renders per-provider credential forms (replaced by the vault)", async () => {
     renderPage();
-    expect(screen.getByTestId("settings.aws.form")).toBeInTheDocument();
-    expect(screen.getByLabelText("Role ARN")).toBeInTheDocument();
-    expect(screen.getByTestId("settings.aws.save_button")).toBeInTheDocument();
+    // The centralized vault replaced the per-provider credential forms (AWS
+    // Role ARN, Azure Client ID/Secret, GCP Service Account JSON), so the old
+    // AWS credential form is gone from the settings page.
+    expect(screen.queryByTestId("settings.aws.form")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Role ARN")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("settings.aws.save_button"),
+    ).not.toBeInTheDocument();
+    // The ThreatIntel and WebhookSecret sections remain intact.
+    expect(
+      screen.getByTestId("settings.threat_intel.section"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("settings.webhook_secrets.section"),
+    ).toBeInTheDocument();
   });
 
   it("renders the threat intelligence section and reflects configured keys without revealing values", async () => {
@@ -204,5 +212,31 @@ describe("CloudSettingsPage (characterize)", () => {
       provider: "AWS",
       secret: "my-aws-secret",
     });
+  });
+
+  it("saves threat intelligence API keys without revealing stored values", async () => {
+    const saveKeys = vi.fn().mockResolvedValue(undefined);
+    useSaveEnrichmentKeysMock.mockReturnValue({
+      mutateAsync: saveKeys,
+      isPending: false,
+    });
+    const user = userEvent.setup();
+    renderPage();
+    const abuseInput = screen.getByTestId(
+      "settings.threat_intel.abuseipdb_input",
+    );
+    const vtInput = screen.getByTestId(
+      "settings.threat_intel.virustotal_input",
+    );
+    await user.type(abuseInput, "abuse-key-123");
+    await user.type(vtInput, "vt-key-456");
+    await user.click(screen.getByTestId("settings.threat_intel.save_button"));
+    expect(saveKeys).toHaveBeenCalledWith({
+      abuseIpdbKey: "abuse-key-123",
+      virusTotalKey: "vt-key-456",
+    });
+    // The typed key values are never rendered back as plaintext.
+    expect(screen.queryByText("abuse-key-123")).not.toBeInTheDocument();
+    expect(screen.queryByText("vt-key-456")).not.toBeInTheDocument();
   });
 });

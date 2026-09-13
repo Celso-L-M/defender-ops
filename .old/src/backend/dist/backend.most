@@ -1,4 +1,31 @@
 // Version: 4.0.0
+type AlertEnrichment__324381658 =
+  {
+    domainRep :
+      ?{
+         cleanVotes : Nat;
+         lastAnalysisDate : Text;
+         maliciousVotes : Nat;
+         suspiciousVotes : Nat
+       };
+    enrichedAt : ?Text;
+    ipReputation :
+      ?{
+         abuseScore : Nat;
+         country : Text;
+         isp : Text;
+         lastReported : Text;
+         totalReports : Nat
+       };
+    knownMaliciousIp : Bool;
+    mitreDetail :
+      ?{
+         description : Text;
+         mitigations : Text;
+         tacticName : Text;
+         techniqueName : Text
+       }
+  };
 type AlertEnrichment__387841213 =
   {
     domainRep :
@@ -216,6 +243,22 @@ type AlertRule__781152731 =
     region : ?Text;
     severityThreshold : ?RuleSeverityThreshold__692281130
   };
+type AlertRule__85302155 =
+  {
+    assetId : ?Text;
+    channels : [NotificationChannel__1061937618];
+    cooldownMinutes : Nat;
+    customer : Text;
+    enabled : Bool;
+    escalationMinutes : ?Nat;
+    escalationRecipient : ?Text;
+    findingType : ?Text;
+    id : Text;
+    name : Text;
+    provider : ?ProviderType__182166310;
+    region : ?Text;
+    severityThreshold : ?RuleSeverityThreshold__871694735
+  };
 type AlertRule__978340630 =
   {
     assetId : ?Text;
@@ -234,6 +277,7 @@ type AlertRule__978340630 =
   };
 type AlertStatus__178230632 = {#InProgress; #Open; #Resolved};
 type AlertStatus__196980156 = {#InProgress; #Open; #Resolved};
+type AlertStatus__215067261 = {#InProgress; #Open; #Resolved};
 type AlertStatus__247016545 = {#InProgress; #Open; #Resolved};
 type AlertStatus__275233151 = {#InProgress; #Open; #Resolved};
 type AlertStatus__379500222 = {#InProgress; #Open; #Resolved};
@@ -241,6 +285,20 @@ type AlertStatus__472936807 = {#InProgress; #Open; #Resolved};
 type AlertStatus__533385890 = {#InProgress; #Open; #Resolved};
 type AlertStatus__667911624 = {#InProgress; #Open; #Resolved};
 type AlertStatus__872859867 = {#InProgress; #Open; #Resolved};
+type AssetType__1023129145 =
+  {
+    #AzureDatabase;
+    #AzureStorage;
+    #AzureVM;
+    #EC2;
+    #GCPCloudSQL;
+    #GCPCompute;
+    #GCPStorage;
+    #Lambda;
+    #Other;
+    #RDS;
+    #S3
+  };
 type AssetType__1034155762 =
   {
     #AzureDatabase;
@@ -451,6 +509,20 @@ type Asset__410078662 =
     riskScore : Nat;
     tags : [(Text, Text)]
   };
+type Asset__600326775 =
+  {
+    accountId : Text;
+    assetType : AssetType__1023129145;
+    customer : Text;
+    id : Text;
+    lastSeen : Int;
+    name : Text;
+    openFindings : Nat;
+    provider : ProviderType__182166310;
+    region : Text;
+    riskScore : Nat;
+    tags : [(Text, Text)]
+  };
 type Asset__64887596 =
   {
     accountId : Text;
@@ -520,6 +592,15 @@ type AuditLogEntry__371676223 =
     id : Text;
     timestamp : Int
   };
+type AuditLogEntry__416788835 =
+  {
+    action : Text;
+    actorId : Text;
+    customer : Text;
+    details : Text;
+    id : Text;
+    timestamp : Int
+  };
 type AuditLogEntry__5591386 =
   {
     action : Text;
@@ -579,6 +660,8 @@ type AwsCredentials__1037118020 =
 type AwsCredentials__206610937 =
   {accessKeyId : Text; regions : [Text]; secretAccessKey : Text};
 type AwsCredentials__296136133 =
+  {externalId : ?Text; regions : [Text]; roleArn : Text};
+type AwsCredentials__337953699 =
   {externalId : ?Text; regions : [Text]; roleArn : Text};
 type AwsCredentials__514734320 =
   {accessKeyId : Text; regions : [Text]; secretAccessKey : Text};
@@ -642,6 +725,13 @@ type AzureCredentials__53075539 =
     tenantId : Text
   };
 type AzureCredentials__547356415 =
+  {
+    clientId : Text;
+    clientSecret : Text;
+    subscriptionIds : [Text];
+    tenantId : Text
+  };
+type AzureCredentials__601452790 =
   {
     clientId : Text;
     clientSecret : Text;
@@ -734,6 +824,18 @@ type ComplianceControl__561534131 =
     status : ControlStatus__279181481;
     title : Text
   };
+type ComplianceControl__601607948 =
+  {
+    controlId : Text;
+    description : Text;
+    failingFindings : Nat;
+    framework : ComplianceFramework__644148843;
+    passingFindings : Nat;
+    provider : ?ProviderType__182166310;
+    remediationGuidance : Text;
+    status : ControlStatus__345259680;
+    title : Text
+  };
 type ComplianceControl__738048459 =
   {
     controlId : Text;
@@ -782,6 +884,8 @@ type ComplianceFramework__530750942 =
   {#CISAws; #CISAzure; #CISGCP; #ISO27001; #NISTCSF; #SOC2};
 type ComplianceFramework__617040893 =
   {#CISAws; #CISAzure; #CISGCP; #ISO27001; #NISTCSF; #SOC2};
+type ComplianceFramework__644148843 =
+  {#CISAws; #CISAzure; #CISGCP; #ISO27001; #NISTCSF; #SOC2};
 type ComplianceFramework__681997027 =
   {#CISAws; #CISAzure; #CISGCP; #ISO27001; #NISTCSF; #SOC2};
 type ComplianceFramework__787408948 =
@@ -807,6 +911,14 @@ type ComplianceTrendEntry__1050464225 =
 type ComplianceTrendEntry__173701295 =
   {
     framework : ComplianceFramework__1064427454;
+    passingControls : Nat;
+    score : Nat;
+    totalControls : Nat;
+    weekTimestamp : Int
+  };
+type ComplianceTrendEntry__288354935 =
+  {
+    framework : ComplianceFramework__644148843;
     passingControls : Nat;
     score : Nat;
     totalControls : Nat;
@@ -863,6 +975,7 @@ type ComplianceTrendEntry__90752022 =
 type ControlStatus__148041898 = {#Failing; #NoCoverage; #Passing};
 type ControlStatus__279181481 = {#Failing; #NoCoverage; #Passing};
 type ControlStatus__325747121 = {#Failing; #NoCoverage; #Passing};
+type ControlStatus__345259680 = {#Failing; #NoCoverage; #Passing};
 type ControlStatus__433193596 = {#Failing; #NoCoverage; #Passing};
 type ControlStatus__578902000 = {#Failing; #NoCoverage; #Passing};
 type ControlStatus__674316254 = {#Failing; #NoCoverage; #Passing};
@@ -971,6 +1084,23 @@ type CorrelatedIncident__618026460 =
     status : IncidentStatus__432088517;
     timeDeltaMinutes : Float
   };
+type CorrelatedIncident__806855013 =
+  {
+    affectedResources : [Text];
+    assignedOwner : ?Text;
+    correlationWindowMinutes : Nat;
+    customer : Text;
+    detectedAt : Int;
+    incidentId : Text;
+    incidentType : Text;
+    notes : ?Text;
+    severity : Severity__88295910;
+    sourceAlerts : [Text];
+    sourceIp : ?Text;
+    sourceProviders : [ProviderType__182166310];
+    status : IncidentStatus__421992833;
+    timeDeltaMinutes : Float
+  };
 type Data__265875254<K, V> = {var count : Nat__58649523; kvs : [var ?(K, V)]};
 type DomainRep__727064164 =
   {
@@ -1005,6 +1135,16 @@ type FailedIngestion__582375576 =
     errorType : Text;
     id : Text;
     provider : ProviderType__147837715;
+    rawPayload : Text;
+    status : Text;
+    timestamp : Int
+  };
+type FailedIngestion__748551862 =
+  {
+    errorMessage : Text;
+    errorType : Text;
+    id : Text;
+    provider : ProviderType__182166310;
     rawPayload : Text;
     status : Text;
     timestamp : Int
@@ -1065,6 +1205,8 @@ type GcpCredentials__484732182 =
   {projectIds : [Text]; serviceAccountJson : Text};
 type GcpCredentials__499815626 =
   {projectIds : [Text]; serviceAccountJson : Text};
+type GcpCredentials__673377876 =
+  {projectIds : [Text]; serviceAccountJson : Text};
 type GcpCredentials__902841032 =
   {projectIds : [Text]; serviceAccountJson : Text};
 type GcpCredentials__977924105 =
@@ -1108,6 +1250,19 @@ type GeneratedReport__547384055 =
     reportId : Text;
     reportType : Text
   };
+type GeneratedReport__635215888 =
+  {
+    csvData : ?Text;
+    customer : Text;
+    dateRangeEnd : Text;
+    dateRangeStart : Text;
+    format : Text;
+    generatedAt : Text;
+    generatedBy : Text;
+    providerScope : [Text];
+    reportId : Text;
+    reportType : Text
+  };
 type GeneratedReport__782850465 =
   {
     csvData : ?Text;
@@ -1123,6 +1278,7 @@ type GeneratedReport__782850465 =
   };
 type IncidentStatus__1029160397 = {#Investigating; #Open; #Resolved};
 type IncidentStatus__148048376 = {#Investigating; #Open; #Resolved};
+type IncidentStatus__421992833 = {#Investigating; #Open; #Resolved};
 type IncidentStatus__429821119 = {#Investigating; #Open; #Resolved};
 type IncidentStatus__432088517 = {#Investigating; #Open; #Resolved};
 type IncidentStatus__6165782 = {#Investigating; #Open; #Resolved};
@@ -1183,6 +1339,14 @@ type IngestionEvent__8417647 =
     source : {#Poll; #Webhook};
     timestamp : Int
   };
+type IngestionEvent__903703130 =
+  {
+    latencyMs : Float;
+    normalizedOk : Bool;
+    provider : ProviderType__182166310;
+    source : {#Poll; #Webhook};
+    timestamp : Int
+  };
 type IngestionSource__751352352 = {#Poll; #Webhook};
 type IngestionSource__844643470 = IngestionSource__751352352;
 type Internal__161573640<K, V> =
@@ -1214,6 +1378,8 @@ type MitreDetail__629628746 =
     tacticName : Text;
     techniqueName : Text
   };
+type MitreTag__1050177280 =
+  {tactic : Text; technique : Text; techniqueId : Text};
 type MitreTag__121820756 =
   {tactic : Text; technique : Text; techniqueId : Text};
 type MitreTag__216729179 =
@@ -1457,6 +1623,47 @@ type NewActor__726524232 =
     rawFindings : List__89170296<RawFinding__283058094>;
     timelineEvents : List__89170296<TimelineEvent__979704648>
   };
+type NewActor__756013677 =
+  {
+    var alertRules : List__89170296<(Text, AlertRule__85302155)>;
+    var assets : List__89170296<(Text, Asset__600326775)>;
+    auditLog : List__89170296<AuditLogEntry__416788835>;
+    var awsAuthError : ?Text;
+    var awsCredentials : ?AwsCredentials__337953699;
+    var awsPollingState : ProviderPollingState__254781848;
+    var azureAuthError : ?Text;
+    var azureCredentials : ?AzureCredentials__601452790;
+    var azurePollingState : ProviderPollingState__254781848;
+    complianceControls : List__89170296<(Text, ComplianceControl__601607948)>;
+    complianceTrend : List__89170296<ComplianceTrendEntry__288354935>;
+    var correlatedIncidents : [(Text, CorrelatedIncident__806855013)];
+    var correlationIntervalMinutes : Nat;
+    var dirtyAssets : [Text];
+    var enrichmentApiKeys : {abuseIpdbKey : ?Text; virusTotalKey : ?Text};
+    failedIngestions : List__89170296<FailedIngestion__748551862>;
+    var findingsDayBucket : Text;
+    var gcpAuthError : ?Text;
+    var gcpCredentials : ?GcpCredentials__673377876;
+    var gcpPollingState : ProviderPollingState__254781848;
+    var generatedReports : [GeneratedReport__635215888];
+    var lastComplianceSnapshotWeek : Text;
+    var lastCorrelationRunNs : Int;
+    var lastMaliciousIpFeedPoll : ?Int;
+    var maliciousIpFeed : [Text];
+    var normalizedAlerts :
+      List__89170296<(Text, NormalizedAlert__1011642407)>;
+    var notificationLogs :
+      List__89170296<(Text, NotificationLog__1032523644)>;
+    pipelineEvents : List__89170296<IngestionEvent__903703130>;
+    var processingOffset : Nat;
+    var providerAssignments :
+      Map__386906547<Principal, [ProviderType__182166310]>;
+    rawFindings : List__89170296<RawFinding__891604524>;
+    var reportEmailConfigs : [ReportEmailConfig__807137395];
+    timelineEvents : List__89170296<TimelineEvent__114476368>;
+    var vaultState : VaultState__363638383;
+    var webhookSecrets : {aws : ?Text; azure : ?Text; gcp : ?Text}
+  };
 type NewActor__981361950 =
   {
     var alertRules : List__89170296<(Text, AlertRule__539455764)>;
@@ -1510,6 +1717,29 @@ type NewNormalizedAlert__73832278 =
   };
 type Node__430031793<K, V> =
   {#internal : Internal__161573640<K, V>; #leaf : Leaf__1045638083<K, V>};
+type NormalizedAlert__1011642407 =
+  {
+    accountId : ?Text;
+    assetId : ?Text;
+    assetType : ?Text;
+    customer : Text;
+    description : Text;
+    enrichment : ?AlertEnrichment__324381658;
+    findingId : Text;
+    id : Text;
+    ingestionSource : ?{#Poll; #Webhook};
+    mitre : ?MitreTag__1050177280;
+    originalSeverity : Text;
+    owner : ?Text;
+    provider : ProviderType__182166310;
+    rawFindingId : Text;
+    recurrenceCount : Nat;
+    region : ?Text;
+    severity : Severity__88295910;
+    status : AlertStatus__215067261;
+    timestamp : Int;
+    title : Text
+  };
 type NormalizedAlert__128935707 =
   {
     accountId : ?Text;
@@ -1688,6 +1918,7 @@ type NormalizedAlert__795749919 =
   };
 type NotificationChannel__1009836043 = {#Email; #InApp; #TeamsWebhook};
 type NotificationChannel__106092748 = {#Email; #InApp; #TeamsWebhook};
+type NotificationChannel__1061937618 = {#Email; #InApp; #TeamsWebhook};
 type NotificationChannel__12556414 = {#Email; #InApp; #TeamsWebhook};
 type NotificationChannel__225432376 = {#Email; #InApp; #TeamsWebhook};
 type NotificationChannel__230200924 = {#Email; #InApp; #TeamsWebhook};
@@ -1706,6 +1937,19 @@ type NotificationLog__1029108062 =
     recipient : Text;
     ruleId : Text;
     status : NotificationStatus__620709563;
+    timestamp : Int
+  };
+type NotificationLog__1032523644 =
+  {
+    acknowledged : Bool;
+    acknowledgedAt : ?Int;
+    alertId : Text;
+    channel : NotificationChannel__1061937618;
+    customer : Text;
+    id : Text;
+    recipient : Text;
+    ruleId : Text;
+    status : NotificationStatus__586195749;
     timestamp : Int
   };
 type NotificationLog__1064887686 =
@@ -1818,9 +2062,50 @@ type NotificationStatus__137818491 = {#Acknowledged; #Failed; #Sent};
 type NotificationStatus__334439840 = {#Acknowledged; #Failed; #Sent};
 type NotificationStatus__365385079 = {#Acknowledged; #Failed; #Sent};
 type NotificationStatus__430738446 = {#Acknowledged; #Failed; #Sent};
+type NotificationStatus__586195749 = {#Acknowledged; #Failed; #Sent};
 type NotificationStatus__620709563 = {#Acknowledged; #Failed; #Sent};
 type NotificationStatus__745437417 = {#Acknowledged; #Failed; #Sent};
 type NotificationStatus__800033180 = {#Acknowledged; #Failed; #Sent};
+type OldActor__1007934830 =
+  {
+    var alertRules : List__89170296<(Text, AlertRule__85302155)>;
+    var assets : List__89170296<(Text, Asset__600326775)>;
+    auditLog : List__89170296<AuditLogEntry__416788835>;
+    var awsAuthError : ?Text;
+    var awsCredentials : ?AwsCredentials__337953699;
+    var awsPollingState : ProviderPollingState__254781848;
+    var azureAuthError : ?Text;
+    var azureCredentials : ?AzureCredentials__601452790;
+    var azurePollingState : ProviderPollingState__254781848;
+    complianceControls : List__89170296<(Text, ComplianceControl__601607948)>;
+    complianceTrend : List__89170296<ComplianceTrendEntry__288354935>;
+    var correlatedIncidents : [(Text, CorrelatedIncident__806855013)];
+    var correlationIntervalMinutes : Nat;
+    var dirtyAssets : [Text];
+    var enrichmentApiKeys : {abuseIpdbKey : ?Text; virusTotalKey : ?Text};
+    failedIngestions : List__89170296<FailedIngestion__748551862>;
+    var findingsDayBucket : Text;
+    var gcpAuthError : ?Text;
+    var gcpCredentials : ?GcpCredentials__673377876;
+    var gcpPollingState : ProviderPollingState__254781848;
+    var generatedReports : [GeneratedReport__635215888];
+    var lastComplianceSnapshotWeek : Text;
+    var lastCorrelationRunNs : Int;
+    var lastMaliciousIpFeedPoll : ?Int;
+    var maliciousIpFeed : [Text];
+    var normalizedAlerts :
+      List__89170296<(Text, NormalizedAlert__1011642407)>;
+    var notificationLogs :
+      List__89170296<(Text, NotificationLog__1032523644)>;
+    pipelineEvents : List__89170296<IngestionEvent__903703130>;
+    var processingOffset : Nat;
+    var providerAssignments :
+      Map__386906547<Principal, [ProviderType__182166310]>;
+    rawFindings : List__89170296<RawFinding__891604524>;
+    var reportEmailConfigs : [ReportEmailConfig__807137395];
+    timelineEvents : List__89170296<TimelineEvent__114476368>;
+    var webhookSecrets : {aws : ?Text; azure : ?Text; gcp : ?Text}
+  };
 type OldActor__1034378703 =
   {
     var alertRules : List__89170296<(Text, AlertRule__125313763)>;
@@ -2091,6 +2376,8 @@ type PollingInterval__269398285 =
   {#FifteenMin; #FiveMin; #OneHour; #ThirtyMin};
 type PollingInterval__337628291 =
   {#FifteenMin; #FiveMin; #OneHour; #ThirtyMin};
+type PollingInterval__41239844 =
+  {#FifteenMin; #FiveMin; #OneHour; #ThirtyMin};
 type PollingInterval__529285525 =
   {#FifteenMin; #FiveMin; #OneHour; #ThirtyMin};
 type PollingInterval__629359012 =
@@ -2099,6 +2386,7 @@ type PollingInterval__653532443 =
   {#FifteenMin; #FiveMin; #OneHour; #ThirtyMin};
 type PollingInterval__807094832 =
   {#FifteenMin; #FiveMin; #OneHour; #ThirtyMin};
+type PollingStatus__146159268 = {#Active; #AuthPaused; #Error; #Inactive};
 type PollingStatus__148005349 = {#Active; #AuthPaused; #Error; #Inactive};
 type PollingStatus__214879533 = {#Active; #AuthPaused; #Error; #Inactive};
 type PollingStatus__263712360 = {#Active; #AuthPaused; #Error; #Inactive};
@@ -2119,6 +2407,17 @@ type ProviderPollingState__169476361 =
     lastSuccessfulPoll : ?Int;
     provider : ProviderType__128041571;
     status : PollingStatus__148005349
+  };
+type ProviderPollingState__254781848 =
+  {
+    consecutiveFailures : Nat;
+    findingsToday : Nat;
+    interval : PollingInterval__41239844;
+    lastError : ?Text;
+    lastPollAttempt : ?Int;
+    lastSuccessfulPoll : ?Int;
+    provider : ProviderType__182166310;
+    status : PollingStatus__146159268
   };
 type ProviderPollingState__267336135 =
   {
@@ -2214,6 +2513,7 @@ type ProviderType__139641622 = ProviderType__629279392;
 type ProviderType__147111492 = {#AWS; #Azure; #GCP};
 type ProviderType__147837715 = {#AWS; #Azure; #GCP};
 type ProviderType__173080468 = {#AWS; #Azure; #GCP};
+type ProviderType__182166310 = {#AWS; #Azure; #GCP};
 type ProviderType__221587143 = {#AWS; #Azure; #GCP};
 type ProviderType__498610206 = {#AWS; #Azure; #GCP};
 type ProviderType__52564044 = {#AWS; #Azure; #GCP};
@@ -2349,7 +2649,22 @@ type RawFinding__864363353 =
     timestamp : Int;
     title : Text
   };
+type RawFinding__891604524 =
+  {
+    accountId : ?Text;
+    description : Text;
+    findingId : Text;
+    id : Text;
+    provider : ProviderType__182166310;
+    rawMetadata : Text;
+    region : ?Text;
+    severity : Severity__88295910;
+    timestamp : Int;
+    title : Text
+  };
 type ReportEmailConfig__180896000 =
+  {customer : Text; recipients : [Text]; reportType : Text};
+type ReportEmailConfig__807137395 =
   {customer : Text; recipients : [Text]; reportType : Text};
 type ReportEmailConfig__846810171 =
   {customer : Text; recipients : [Text]; reportType : Text};
@@ -2375,6 +2690,8 @@ type RuleSeverityThreshold__692281130 =
   {#All; #AnyCritical; #AnyHigh; #AnyLow; #AnyMedium; #CriticalOrHigh};
 type RuleSeverityThreshold__80298967 =
   {#All; #AnyCritical; #AnyHigh; #AnyLow; #AnyMedium; #CriticalOrHigh};
+type RuleSeverityThreshold__871694735 =
+  {#All; #AnyCritical; #AnyHigh; #AnyLow; #AnyMedium; #CriticalOrHigh};
 type Severity__1022346806 = {#Critical; #High; #Low; #Medium; #Unknown};
 type Severity__115128613 = {#Critical; #High; #Low; #Medium; #Unknown};
 type Severity__453656225 = {#Critical; #High; #Low; #Medium; #Unknown};
@@ -2385,6 +2702,18 @@ type Severity__798834835 = {#Critical; #High; #Low; #Medium; #Unknown};
 type Severity__831158603 = {#Critical; #High; #Low; #Medium; #Unknown};
 type Severity__857493186 = {#Critical; #High; #Low; #Medium; #Unknown};
 type Severity__85997960 = {#Critical; #High; #Low; #Medium; #Unknown};
+type Severity__88295910 = {#Critical; #High; #Low; #Medium; #Unknown};
+type TimelineEvent__114476368 =
+  {
+    customer : Text;
+    description : Text;
+    eventType : Text;
+    id : Text;
+    provider : ?ProviderType__182166310;
+    severity : ?Severity__88295910;
+    timestamp : Int;
+    title : Text
+  };
 type TimelineEvent__250719925 =
   {
     customer : Text;
@@ -2484,6 +2813,31 @@ type TimelineEvent__979704648 =
     timestamp : Int;
     title : Text
   };
+type VaultEntry__337621062 =
+  {
+    ciphertext : Blob;
+    createdAt : Int;
+    name : Text;
+    nonce : Blob;
+    provider : ProviderType__182166310;
+    updatedAt : Int
+  };
+type VaultEntry__429589054 =
+  {
+    ciphertext : Blob;
+    createdAt : Int;
+    name : VaultSecretName__192675498;
+    nonce : Blob;
+    provider : ProviderType__629279392;
+    updatedAt : Int
+  };
+type VaultSecretName__192675498 = Text;
+type VaultState__363638383 =
+  {
+    var entries :
+      Map__386906547<(ProviderType__182166310, Text), VaultEntry__337621062>;
+    var key : ?Blob
+  };
 {
   "20260528_000000_InitIngestion" :
     OldActor__731929738 -> NewActor__1063747108;
@@ -2501,7 +2855,8 @@ type TimelineEvent__979704648 =
     (old : OldActor__473916000) -> NewActor__573750413;
   "20260528_500000" : (old : OldActor__18480889) -> NewActor__625670827;
   "20260528_600000_AddPerProviderAccessControl" :
-    (old : OldActor__973941399) -> NewActor__278998087
+    (old : OldActor__973941399) -> NewActor__278998087;
+  "20260913_000000" : (old : OldActor__1007934830) -> NewActor__756013677
 }
 actor  {
   stable var alertRules :
@@ -2626,6 +2981,13 @@ actor  {
       var blockIndex : Nat__58649523;
       var blocks : [var [var ?TimelineEvent__446867691]];
       var elementIndex : Nat__58649523
+    };
+  stable vaultState :
+    {
+      var entries :
+        Map__386906547<(ProviderType__629279392, VaultSecretName__192675498),
+                        VaultEntry__429589054>;
+      var key : ?Blob
     };
   stable var webhookSecrets : {aws : ?Text; azure : ?Text; gcp : ?Text}
 };

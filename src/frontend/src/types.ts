@@ -395,3 +395,23 @@ export interface ComplianceScore {
   passing: bigint;
   failing: bigint;
 }
+
+// Vault types — mirror the backend vault contract. Values are always masked in
+// list/overview views; plaintext is only returned by an explicit reveal call.
+export interface VaultEntryView {
+  provider: ProviderType;
+  name: string;
+  maskedValue: string;
+  createdAt: bigint;
+  updatedAt: bigint;
+}
+
+export type VaultError =
+  | { __kind__: "NotAuthorized" }
+  | { __kind__: "NotFound" }
+  | { __kind__: "AlreadyExists" }
+  | { __kind__: "InvalidName" };
+
+export type VaultResult<T> =
+  | { __kind__: "ok"; ok: T }
+  | { __kind__: "err"; err: VaultError };

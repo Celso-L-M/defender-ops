@@ -81,6 +81,49 @@ remediation. Provider-scoped reads and remediation actions (`blockIp`,
 `forceGcpIamReview`, `escalateToIncident`) all enforce assignment via
 `requireProviderAccess`.
 
+### Centralized secure vault
+
+The vault replaces the legacy per-provider credential forms
+(`saveAwsCredentials` / `saveAzureCredentials` / `saveGcpCredentials`, which
+have been removed). It stores arbitrary named secrets per provider — API keys,
+service-account JSON, webhook tokens, and any other credential — encrypted at
+rest. The vault methods are:
+
+- `saveVaultSecret(provider, name, value)` — store a new named secret. Returns
+  `#AlreadyExists` if a secret with that name already exists for the provider,
+  `#InvalidName` if the name is empty or longer than 256 characters.
+- `updateVaultSecret(provider, name, value)` — overwrite an existing secret.
+  Returns `#NotFound` if it does not exist, `#InvalidName` on an invalid name.
+- `deleteVaultSecret(provider, name)` — remove a secret. Returns `#NotFound` if
+  it does not exist.
+- `listVaultSecrets(provider)` — list all secrets for a provider as masked
+  views. **Never returns plaintext.**
+- `revealVaultSecret(provider, name)` — decrypt and return a single secret
+  value on demand. Returns `#NotFound` if it does not exist.
+
+Every vault method first runs `requireVaultAccess(caller, provider, fnName)`,
+which rejects anonymous callers with an `Unauthorized` trap and then enforces
+per-provider access control. The owner (SYS_ADMIN / canister controller — the
+principal that is a controller of the canister, identified via
+`Principal.isController`) is granted access to every provider's vault
+regardless of per-provider assignment, so the owner can set up and manage
+secrets for all providers even before any `assignProviderAccess` has been
+issued. Non-owner users are restricted to only the providers they are assigned
+to: `requireProviderAccess` traps with `Not authorized for provider` when a
+non-owner caller is not assigned to the requested provider. Every successful
+create/update/delete/reveal writes an audit entry (`VaultSecretCreated` /
+`VaultSecretUpdated` / `VaultSecretDeleted` / `VaultSecretRevealed`).
+
+**Encryption at rest.** Secrets are encrypted with a SHA-256-based
+authenticated scheme (CTR-mode keystream with an Encrypt-then-MAC integrity
+tag). The 32-byte key is seeded from `raw_rand` on the first vault write and
+held in memory; only the ciphertext and nonce are persisted. The plaintext is
+never stored and never appears in list/overview responses — only a fixed
+mask (`••••••••`) is shown. Decryption verifies the integrity tag and traps if
+it does not match (tampered or corrupted data). Because the key is derived from
+`raw_rand` and held in memory, a canister upgrade does not rotate it; the key
+persists in stable state across upgrades.
+
 ### Identity derivation
 
 The app's frontend pins an Internet Identity derivation origin, published at
@@ -191,14 +234,15 @@ heartbeat, not inline.
   the ID was not present).
 - **Correlated incidents**: `runCorrelationEngine` skips incidents whose
   `incidentId` already exists, so re-running is safe.
-- **Mock seeding**: `seedMockAlertsAndRunCorrelation` only adds mock alerts whose
-  IDs are not already present.
 - **Reports**: `generateReport` creates a new report each call (IDs are
   time-based); `deleteReport` is idempotent.
 - **Report email config**: `saveReportEmailConfig` is an upsert keyed by
   `reportType` + `customer`.
-- **Credentials**: saving credentials replaces the stored value and invalidates
-  any cached session/token.
+- **Vault secrets**: `saveVaultSecret` returns `#AlreadyExists` when a secret
+  with the same name already exists for the provider; `updateVaultSecret`
+  overwrites an existing secret in place. `deleteVaultSecret` is idempotent
+  (returns `#NotFound` when the secret is absent). Re-saving the same value
+  re-encrypts it with a fresh timestamp.
 - **Webhook secrets**: `saveWebhookSecret` overwrites the per-provider secret.
   There is no versioned-key rotation in this build; rotating means calling
   `saveWebhookSecret` again with a new value.
@@ -233,11 +277,15 @@ Intelligence agent) can read them; end users cannot. Exposed entities include
 raw findings, normalized alerts, assets, compliance controls, compliance trend,
 alert rules, notification logs, timeline events, audit log, failed ingestions,
 pipeline events, correlated incidents, generated reports, report email configs,
-per-provider polling states (`providerPollingState`), and per-provider access
-assignments (`providerAssignment`, one row per principal/provider pair).
-**Secret values are never exposed**: webhook secrets, enrichment API keys, and
-cloud credentials are write-only and absent from the OQL schema. Sensitive
-payload fields (e.g. failed-ingestion raw payloads, report CSV data,
+per-provider polling states (`providerPollingState`), per-provider access
+assignments (`providerAssignment`, one row per principal/provider pair), and
+vault entries (`vaultEntry`).
+**Secret values are never exposed**: webhook secrets, enrichment API keys, cloud
+credentials, and the encrypted vault ciphertext/nonce/plaintext are write-only
+and absent from the OQL schema. The `vaultEntry` entity exposes ONLY non-sensitive
+vault metadata — `provider`, `name`, `createdAt`, `updatedAt`, and a fixed
+`maskedValue` mask — never the encrypted blob, nonce, or any plaintext secret.
+Sensitive payload fields (e.g. failed-ingestion raw payloads, report CSV data,
 notification recipients) are also omitted from the queryable surface.
 
 ## Non-obvious Gotchas
@@ -250,7 +298,9 @@ notification recipients) are also omitted from the queryable surface.
 - The `execute` OQL method is named `execute` because `query` is a reserved
   keyword in Motoko.
 - Webhook secrets, enrichment keys, and cloud credentials are stored write-only
-  and are never returned to the frontend or exposed through OQL.
+  and are never returned to the frontend or exposed through OQL. Vault secrets
+  are encrypted at rest and returned only as masked views, except on an explicit
+  `revealVaultSecret` call.
 - `getFailedIngestions` and `getPipelineHealth` return provider as `Text` to
   avoid Candid variant decoding issues on the frontend.
 - Provider-scoped reads fall into two behaviors: methods that call

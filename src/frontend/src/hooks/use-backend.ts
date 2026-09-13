@@ -40,6 +40,8 @@ import type {
   SearchResult,
   TimelineEvent,
   UserAssignmentView,
+  VaultEntryView,
+  VaultResult,
   WebhookSecretStatus,
 } from "../types";
 
@@ -198,25 +200,6 @@ export function useRawFindings(provider: ProviderType, limit: number) {
   });
 }
 
-export function useSaveAwsCredentials() {
-  const { actor } = useActor(createActor);
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (creds: {
-      roleArn: string;
-      externalId?: string;
-      regions: string[];
-    }) => {
-      if (!actor) throw new Error("Actor not ready");
-      return actor.saveAwsCredentials(creds);
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["providerStates"] });
-      qc.invalidateQueries({ queryKey: ["credentialHealth"] });
-    },
-  });
-}
-
 export function useCredentialHealth() {
   const { actor, isFetching } = useActor(createActor);
   return useQuery<CredentialHealthStatus[]>({
@@ -260,44 +243,6 @@ export function useCredentialHealth() {
     refetchInterval: STALE_30S,
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: false,
-  });
-}
-
-export function useSaveAzureCredentials() {
-  const { actor } = useActor(createActor);
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (creds: {
-      clientId: string;
-      clientSecret: string;
-      tenantId: string;
-      subscriptionIds: string[];
-    }) => {
-      if (!actor) throw new Error("Actor not ready");
-      return actor.saveAzureCredentials(creds);
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["providerStates"] });
-      qc.invalidateQueries({ queryKey: ["credentialHealth"] });
-    },
-  });
-}
-
-export function useSaveGcpCredentials() {
-  const { actor } = useActor(createActor);
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (creds: {
-      serviceAccountJson: string;
-      projectIds: string[];
-    }) => {
-      if (!actor) throw new Error("Actor not ready");
-      return actor.saveGcpCredentials(creds);
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["providerStates"] });
-      qc.invalidateQueries({ queryKey: ["credentialHealth"] });
-    },
   });
 }
 
@@ -973,23 +918,6 @@ export function useCorrelatedIncidentById(id: string) {
   });
 }
 
-export function useSeedAndTestCorrelation() {
-  const { actor } = useActor(createActor);
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async () => {
-      if (!actor) throw new Error("Actor not ready");
-      return actor.seedMockAlertsAndRunCorrelation() as Promise<
-        CorrelatedIncident[]
-      >;
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["correlatedIncidents"] });
-      qc.invalidateQueries({ queryKey: ["correlationStats"] });
-    },
-  });
-}
-
 export function useUpdateCorrelatedIncidentStatus() {
   const { actor } = useActor(createActor);
   const qc = useQueryClient();
@@ -1127,6 +1055,123 @@ export function useSaveWebhookSecret() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["webhookSecretStatus"] });
+    },
+  });
+}
+
+// ── Vault hooks ────────────────────────────────────────────────────────────
+
+export function useListVaultSecrets(provider: ProviderType) {
+  const { actor, isFetching } = useActor(createActor);
+  return useQuery<VaultEntryView[]>({
+    queryKey: ["vaultSecrets", provider],
+    queryFn: async () => {
+      if (!actor) return [];
+      return actor.listVaultSecrets(toBackendProvider(provider)) as Promise<
+        VaultEntryView[]
+      >;
+    },
+    enabled: !!actor && !isFetching,
+    staleTime: STALE_30S,
+  });
+}
+
+export function useSaveVaultSecret() {
+  const { actor } = useActor(createActor);
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      provider,
+      name,
+      value,
+    }: {
+      provider: ProviderType;
+      name: string;
+      value: string;
+    }) => {
+      if (!actor) throw new Error("Actor not ready");
+      return actor.saveVaultSecret(
+        toBackendProvider(provider),
+        name,
+        value,
+      ) as Promise<VaultResult<null>>;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["vaultSecrets"] });
+    },
+  });
+}
+
+export function useUpdateVaultSecret() {
+  const { actor } = useActor(createActor);
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      provider,
+      name,
+      value,
+    }: {
+      provider: ProviderType;
+      name: string;
+      value: string;
+    }) => {
+      if (!actor) throw new Error("Actor not ready");
+      return actor.updateVaultSecret(
+        toBackendProvider(provider),
+        name,
+        value,
+      ) as Promise<VaultResult<null>>;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["vaultSecrets"] });
+    },
+  });
+}
+
+export function useDeleteVaultSecret() {
+  const { actor } = useActor(createActor);
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      provider,
+      name,
+    }: {
+      provider: ProviderType;
+      name: string;
+    }) => {
+      if (!actor) throw new Error("Actor not ready");
+      return actor.deleteVaultSecret(
+        toBackendProvider(provider),
+        name,
+      ) as Promise<VaultResult<null>>;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["vaultSecrets"] });
+    },
+  });
+}
+
+export function useRevealVaultSecret() {
+  const { actor } = useActor(createActor);
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      provider,
+      name,
+    }: {
+      provider: ProviderType;
+      name: string;
+    }) => {
+      if (!actor) throw new Error("Actor not ready");
+      const result = (await actor.revealVaultSecret(
+        toBackendProvider(provider),
+        name,
+      )) as VaultResult<string>;
+      if (result.__kind__ === "err") throw new Error(result.err.__kind__);
+      return result.ok;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["vaultSecrets"] });
     },
   });
 }

@@ -20,7 +20,15 @@ export const PlaybookResult = IDL.Record({
   'message' : IDL.Text,
   'success' : IDL.Bool,
 });
-export const Result_1 = IDL.Variant({ 'ok' : IDL.Text, 'err' : IDL.Text });
+export const VaultSecretName = IDL.Text;
+export const VaultError = IDL.Variant({
+  'NotFound' : IDL.Null,
+  'NotAuthorized' : IDL.Null,
+  'AlreadyExists' : IDL.Null,
+  'InvalidName' : IDL.Null,
+});
+export const Result = IDL.Variant({ 'ok' : IDL.Null, 'err' : VaultError });
+export const Result_3 = IDL.Variant({ 'ok' : IDL.Text, 'err' : IDL.Text });
 export const Value = IDL.Variant({
   'int' : IDL.Int,
   'nat' : IDL.Nat,
@@ -42,7 +50,7 @@ export const ComplianceFramework = IDL.Variant({
   'CISAzure' : IDL.Null,
   'NISTCSF' : IDL.Null,
 });
-export const Result = IDL.Variant({
+export const Result_2 = IDL.Variant({
   'ok' : IDL.Record({ 'csvData' : IDL.Text, 'reportId' : IDL.Text }),
   'err' : IDL.Text,
 });
@@ -329,21 +337,14 @@ export const UserAssignmentView = IDL.Record({
   'principal' : IDL.Text,
   'providers' : IDL.Vec(ProviderType),
 });
-export const AwsCredentials = IDL.Record({
-  'externalId' : IDL.Opt(IDL.Text),
-  'roleArn' : IDL.Text,
-  'regions' : IDL.Vec(IDL.Text),
+export const VaultEntryView = IDL.Record({
+  'provider' : ProviderType,
+  'name' : VaultSecretName,
+  'createdAt' : IDL.Int,
+  'updatedAt' : IDL.Int,
+  'maskedValue' : IDL.Text,
 });
-export const AzureCredentials = IDL.Record({
-  'clientId' : IDL.Text,
-  'subscriptionIds' : IDL.Vec(IDL.Text),
-  'tenantId' : IDL.Text,
-  'clientSecret' : IDL.Text,
-});
-export const GcpCredentials = IDL.Record({
-  'serviceAccountJson' : IDL.Text,
-  'projectIds' : IDL.Vec(IDL.Text),
-});
+export const Result_1 = IDL.Variant({ 'ok' : IDL.Text, 'err' : VaultError });
 export const ConnectionTestResult = IDL.Variant({
   'Success' : IDL.Text,
   'Failure' : IDL.Text,
@@ -385,6 +386,7 @@ export const idlService = IDL.Service({
     ),
   'deleteAlertRule' : IDL.Func([IDL.Text], [IDL.Bool], []),
   'deleteReport' : IDL.Func([IDL.Text, IDL.Text], [], []),
+  'deleteVaultSecret' : IDL.Func([ProviderType, VaultSecretName], [Result], []),
   'disableAzureAdAccount' : IDL.Func(
       [
         IDL.Record({
@@ -396,7 +398,7 @@ export const idlService = IDL.Service({
       [PlaybookResult],
       [],
     ),
-  'enrichAlertPublic' : IDL.Func([IDL.Text, IDL.Text], [Result_1], []),
+  'enrichAlertPublic' : IDL.Func([IDL.Text, IDL.Text], [Result_3], []),
   'escalateToIncident' : IDL.Func(
       [
         IDL.Record({
@@ -443,7 +445,7 @@ export const idlService = IDL.Service({
           'reportType' : IDL.Text,
         }),
       ],
-      [Result],
+      [Result_2],
       [],
     ),
   'getAlertById' : IDL.Func([IDL.Text], [IDL.Opt(NormalizedAlert)], ['query']),
@@ -700,7 +702,17 @@ export const idlService = IDL.Service({
       [IDL.Vec(UserAssignmentView)],
       ['query'],
     ),
+  'listVaultSecrets' : IDL.Func(
+      [ProviderType],
+      [IDL.Vec(VaultEntryView)],
+      ['query'],
+    ),
   'removeProviderAccess' : IDL.Func([IDL.Principal, ProviderType], [], []),
+  'revealVaultSecret' : IDL.Func(
+      [ProviderType, VaultSecretName],
+      [Result_1],
+      [],
+    ),
   'revokeIamCredentials' : IDL.Func(
       [
         IDL.Record({
@@ -715,8 +727,6 @@ export const idlService = IDL.Service({
       [],
     ),
   'saveAlertRule' : IDL.Func([AlertRule], [IDL.Bool], []),
-  'saveAwsCredentials' : IDL.Func([AwsCredentials], [], []),
-  'saveAzureCredentials' : IDL.Func([AzureCredentials], [], []),
   'saveEnrichmentKeys' : IDL.Func(
       [
         IDL.Record({
@@ -727,7 +737,6 @@ export const idlService = IDL.Service({
       [],
       [],
     ),
-  'saveGcpCredentials' : IDL.Func([GcpCredentials], [], []),
   'saveReportEmailConfig' : IDL.Func(
       [
         IDL.Record({
@@ -739,13 +748,13 @@ export const idlService = IDL.Service({
       [],
       [],
     ),
-  'saveWebhookSecret' : IDL.Func([ProviderType, IDL.Text], [], []),
-  'schema' : IDL.Func([], [IDL.Text], ['query']),
-  'seedMockAlertsAndRunCorrelation' : IDL.Func(
-      [],
-      [IDL.Vec(CorrelatedIncident)],
+  'saveVaultSecret' : IDL.Func(
+      [ProviderType, VaultSecretName, IDL.Text],
+      [Result],
       [],
     ),
+  'saveWebhookSecret' : IDL.Func([ProviderType, IDL.Text], [], []),
+  'schema' : IDL.Func([], [IDL.Text], ['query']),
   'setPollingInterval' : IDL.Func([ProviderType, PollingInterval], [], []),
   'testAwsConnection' : IDL.Func([], [ConnectionTestResult], []),
   'testAzureConnection' : IDL.Func([], [ConnectionTestResult], []),
@@ -766,6 +775,11 @@ export const idlService = IDL.Service({
       [IDL.Bool],
       [],
     ),
+  'updateVaultSecret' : IDL.Func(
+      [ProviderType, VaultSecretName, IDL.Text],
+      [Result],
+      [],
+    ),
 });
 
 export const idlInitArgs = [];
@@ -783,7 +797,15 @@ export const idlFactory = ({ IDL }) => {
     'message' : IDL.Text,
     'success' : IDL.Bool,
   });
-  const Result_1 = IDL.Variant({ 'ok' : IDL.Text, 'err' : IDL.Text });
+  const VaultSecretName = IDL.Text;
+  const VaultError = IDL.Variant({
+    'NotFound' : IDL.Null,
+    'NotAuthorized' : IDL.Null,
+    'AlreadyExists' : IDL.Null,
+    'InvalidName' : IDL.Null,
+  });
+  const Result = IDL.Variant({ 'ok' : IDL.Null, 'err' : VaultError });
+  const Result_3 = IDL.Variant({ 'ok' : IDL.Text, 'err' : IDL.Text });
   const Value = IDL.Variant({
     'int' : IDL.Int,
     'nat' : IDL.Nat,
@@ -805,7 +827,7 @@ export const idlFactory = ({ IDL }) => {
     'CISAzure' : IDL.Null,
     'NISTCSF' : IDL.Null,
   });
-  const Result = IDL.Variant({
+  const Result_2 = IDL.Variant({
     'ok' : IDL.Record({ 'csvData' : IDL.Text, 'reportId' : IDL.Text }),
     'err' : IDL.Text,
   });
@@ -1092,21 +1114,14 @@ export const idlFactory = ({ IDL }) => {
     'principal' : IDL.Text,
     'providers' : IDL.Vec(ProviderType),
   });
-  const AwsCredentials = IDL.Record({
-    'externalId' : IDL.Opt(IDL.Text),
-    'roleArn' : IDL.Text,
-    'regions' : IDL.Vec(IDL.Text),
+  const VaultEntryView = IDL.Record({
+    'provider' : ProviderType,
+    'name' : VaultSecretName,
+    'createdAt' : IDL.Int,
+    'updatedAt' : IDL.Int,
+    'maskedValue' : IDL.Text,
   });
-  const AzureCredentials = IDL.Record({
-    'clientId' : IDL.Text,
-    'subscriptionIds' : IDL.Vec(IDL.Text),
-    'tenantId' : IDL.Text,
-    'clientSecret' : IDL.Text,
-  });
-  const GcpCredentials = IDL.Record({
-    'serviceAccountJson' : IDL.Text,
-    'projectIds' : IDL.Vec(IDL.Text),
-  });
+  const Result_1 = IDL.Variant({ 'ok' : IDL.Text, 'err' : VaultError });
   const ConnectionTestResult = IDL.Variant({
     'Success' : IDL.Text,
     'Failure' : IDL.Text,
@@ -1148,6 +1163,11 @@ export const idlFactory = ({ IDL }) => {
       ),
     'deleteAlertRule' : IDL.Func([IDL.Text], [IDL.Bool], []),
     'deleteReport' : IDL.Func([IDL.Text, IDL.Text], [], []),
+    'deleteVaultSecret' : IDL.Func(
+        [ProviderType, VaultSecretName],
+        [Result],
+        [],
+      ),
     'disableAzureAdAccount' : IDL.Func(
         [
           IDL.Record({
@@ -1159,7 +1179,7 @@ export const idlFactory = ({ IDL }) => {
         [PlaybookResult],
         [],
       ),
-    'enrichAlertPublic' : IDL.Func([IDL.Text, IDL.Text], [Result_1], []),
+    'enrichAlertPublic' : IDL.Func([IDL.Text, IDL.Text], [Result_3], []),
     'escalateToIncident' : IDL.Func(
         [
           IDL.Record({
@@ -1206,7 +1226,7 @@ export const idlFactory = ({ IDL }) => {
             'reportType' : IDL.Text,
           }),
         ],
-        [Result],
+        [Result_2],
         [],
       ),
     'getAlertById' : IDL.Func(
@@ -1472,7 +1492,17 @@ export const idlFactory = ({ IDL }) => {
         [IDL.Vec(UserAssignmentView)],
         ['query'],
       ),
+    'listVaultSecrets' : IDL.Func(
+        [ProviderType],
+        [IDL.Vec(VaultEntryView)],
+        ['query'],
+      ),
     'removeProviderAccess' : IDL.Func([IDL.Principal, ProviderType], [], []),
+    'revealVaultSecret' : IDL.Func(
+        [ProviderType, VaultSecretName],
+        [Result_1],
+        [],
+      ),
     'revokeIamCredentials' : IDL.Func(
         [
           IDL.Record({
@@ -1487,8 +1517,6 @@ export const idlFactory = ({ IDL }) => {
         [],
       ),
     'saveAlertRule' : IDL.Func([AlertRule], [IDL.Bool], []),
-    'saveAwsCredentials' : IDL.Func([AwsCredentials], [], []),
-    'saveAzureCredentials' : IDL.Func([AzureCredentials], [], []),
     'saveEnrichmentKeys' : IDL.Func(
         [
           IDL.Record({
@@ -1499,7 +1527,6 @@ export const idlFactory = ({ IDL }) => {
         [],
         [],
       ),
-    'saveGcpCredentials' : IDL.Func([GcpCredentials], [], []),
     'saveReportEmailConfig' : IDL.Func(
         [
           IDL.Record({
@@ -1511,13 +1538,13 @@ export const idlFactory = ({ IDL }) => {
         [],
         [],
       ),
-    'saveWebhookSecret' : IDL.Func([ProviderType, IDL.Text], [], []),
-    'schema' : IDL.Func([], [IDL.Text], ['query']),
-    'seedMockAlertsAndRunCorrelation' : IDL.Func(
-        [],
-        [IDL.Vec(CorrelatedIncident)],
+    'saveVaultSecret' : IDL.Func(
+        [ProviderType, VaultSecretName, IDL.Text],
+        [Result],
         [],
       ),
+    'saveWebhookSecret' : IDL.Func([ProviderType, IDL.Text], [], []),
+    'schema' : IDL.Func([], [IDL.Text], ['query']),
     'setPollingInterval' : IDL.Func([ProviderType, PollingInterval], [], []),
     'testAwsConnection' : IDL.Func([], [ConnectionTestResult], []),
     'testAzureConnection' : IDL.Func([], [ConnectionTestResult], []),
@@ -1536,6 +1563,11 @@ export const idlFactory = ({ IDL }) => {
     'updateCorrelatedIncidentStatus' : IDL.Func(
         [IDL.Text, IncidentStatus, IDL.Opt(IDL.Text), IDL.Opt(IDL.Text)],
         [IDL.Bool],
+        [],
+      ),
+    'updateVaultSecret' : IDL.Func(
+        [ProviderType, VaultSecretName, IDL.Text],
+        [Result],
         [],
       ),
   });

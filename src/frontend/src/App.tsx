@@ -31,6 +31,7 @@ const GcpDashboardPage = React.lazy(() => import("./pages/GcpDashboardPage"));
 const ProviderAccessPage = React.lazy(
   () => import("./pages/ProviderAccessPage"),
 );
+const VaultPage = React.lazy(() => import("./pages/VaultPage"));
 
 const rootRoute = createRootRoute();
 
@@ -80,6 +81,16 @@ const providerAccessRoute = createRoute({
   component: () => (
     <Suspense fallback={<LoadingSpinner className="h-screen" size={32} />}>
       <ProviderAccessPage />
+    </Suspense>
+  ),
+});
+
+const vaultRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/vault",
+  component: () => (
+    <Suspense fallback={<LoadingSpinner className="h-screen" size={32} />}>
+      <VaultPage />
     </Suspense>
   ),
 });
@@ -199,6 +210,7 @@ const routeTree = rootRoute.addChildren([
   azureDashboardRoute,
   gcpDashboardRoute,
   providerAccessRoute,
+  vaultRoute,
   settingsRoute,
   findingsRoute,
   complianceRoute,

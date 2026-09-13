@@ -210,3 +210,88 @@ describe("webhook signature verification and failed ingestion", () => {
     expect(failed).toHaveLength(webhookFixtures.length * 2);
   });
 });
+
+describe("vault secret management", () => {
+  it("answers an empty vault read instead of trapping", async () => {
+    actor.setPrincipal(ADMIN);
+    await expect(actor.listVaultSecrets({ AWS: null })).resolves.toEqual([]);
+  });
+
+  it("round-trips a named secret: save, list masked, reveal plaintext, delete", async () => {
+    actor.setPrincipal(ADMIN);
+    await expect(
+      actor.saveVaultSecret({ AWS: null }, "prod-api-key", "super-secret-value"),
+    ).resolves.toEqual({ ok: null });
+
+    const listed = await actor.listVaultSecrets({ AWS: null });
+    expect(listed).toHaveLength(1);
+    expect(listed[0]).toMatchObject({
+      name: "prod-api-key",
+      provider: { AWS: null },
+    });
+    // The list view returns a masked value, never the plaintext.
+    expect(listed[0].maskedValue).not.toContain("super-secret-value");
+
+    const revealed = await actor.revealVaultSecret(
+      { AWS: null },
+      "prod-api-key",
+    );
+    expect(revealed).toEqual({ ok: "super-secret-value" });
+
+    await expect(
+      actor.deleteVaultSecret({ AWS: null }, "prod-api-key"),
+    ).resolves.toEqual({ ok: null });
+    await expect(actor.listVaultSecrets({ AWS: null })).resolves.toEqual([]);
+  });
+
+  it("updates an existing named secret", async () => {
+    actor.setPrincipal(ADMIN);
+    await actor.saveVaultSecret({ Azure: null }, "azure-secret", "v1");
+    await expect(
+      actor.updateVaultSecret({ Azure: null }, "azure-secret", "v2"),
+    ).resolves.toEqual({ ok: null });
+    const revealed = await actor.revealVaultSecret(
+      { Azure: null },
+      "azure-secret",
+    );
+    expect(revealed).toEqual({ ok: "v2" });
+  });
+
+  it("rejects vault operations from a caller without provider access", async () => {
+    actor.setPrincipal(Principal.anonymous());
+    await expect(
+      actor.saveVaultSecret({ AWS: null }, "x", "y"),
+    ).rejects.toThrow();
+  });
+
+  it("grants the owner every provider's vault and restricts a non-owner to assigned providers", async () => {
+    // The owner (canister controller) can manage every provider's vault even
+    // without any per-provider assignment — the repaired access-control rule.
+    actor.setPrincipal(ADMIN);
+    await expect(
+      actor.saveVaultSecret({ GCP: null }, "owner-gcp-key", "owner-value"),
+    ).resolves.toEqual({ ok: null });
+
+    // A non-owner user assigned only to AWS can manage the AWS vault...
+    const alice = Principal.fromBlob(
+      Uint8Array.from([
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
+        20, 21, 22, 23, 24, 25, 26, 27, 28, 29,
+      ]),
+    );
+    actor.setPrincipal(ADMIN);
+    await expect(
+      actor.assignProviderAccess(alice, [{ AWS: null }]),
+    ).resolves.toBeNull();
+
+    actor.setPrincipal(alice);
+    await expect(
+      actor.saveVaultSecret({ AWS: null }, "alice-aws-key", "alice-value"),
+    ).resolves.toEqual({ ok: null });
+
+    // ...but cannot manage the Azure vault they are not assigned to.
+    await expect(
+      actor.saveVaultSecret({ Azure: null }, "x", "y"),
+    ).rejects.toThrow();
+  });
+});

@@ -1,11 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import {
-  AlertTriangle,
-  ArrowRight,
-  ChevronRight,
-  GitMerge,
-  X,
-} from "lucide-react";
+import { ArrowRight, ChevronRight, GitMerge, X } from "lucide-react";
 import React, { useState } from "react";
 import { Layout } from "../components/Layout";
 import { LoadingSpinner } from "../components/LoadingSpinner";
@@ -14,7 +8,6 @@ import {
   useAlertsForCorrelation,
   useCorrelatedIncidents,
   useCorrelationStats,
-  useSeedAndTestCorrelation,
   useUpdateCorrelatedIncidentStatus,
 } from "../hooks/use-backend";
 import type {
@@ -475,7 +468,7 @@ function BreakdownSection() {
             className="py-8 text-center"
           >
             <p className="font-mono text-xs text-muted-foreground">
-              No incidents detected yet — run Test Correlation to seed data
+              No incidents detected yet
             </p>
           </div>
         ) : (
@@ -537,10 +530,6 @@ function IncidentFeedTable({
             <GitMerge size={28} className="mx-auto text-muted-foreground/40" />
             <p className="font-mono text-xs text-muted-foreground">
               No correlated incidents yet
-            </p>
-            <p className="font-mono text-[11px] text-muted-foreground/60">
-              Use the Test Correlation button to seed mock data and run the
-              engine
             </p>
           </div>
         ) : (
@@ -626,99 +615,10 @@ function IncidentFeedTable({
   );
 }
 
-// ---- Test result banner ----
-function TestResultBanner({
-  incidents,
-  onDismiss,
-}: {
-  incidents: CorrelatedIncident[];
-  onDismiss: () => void;
-}) {
-  return (
-    <div
-      data-ocid="correlation.test_result.success_state"
-      className="rounded-md border border-primary/50 bg-primary/10 px-4 py-3 flex items-start gap-3"
-    >
-      <GitMerge size={15} className="text-primary shrink-0 mt-0.5" />
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-semibold text-primary">
-          Test complete — {incidents.length} correlated incident
-          {incidents.length !== 1 ? "s" : ""} detected
-        </p>
-        <ul className="mt-1 space-y-0.5">
-          {incidents.map((inc, i) => (
-            <li
-              key={inc.incidentId ?? i}
-              className="font-mono text-[11px] text-foreground"
-            >
-              • {inc.incidentType} {inc.sourceIp ? `(IP: ${inc.sourceIp})` : ""}
-            </li>
-          ))}
-        </ul>
-      </div>
-      <button
-        type="button"
-        data-ocid="correlation.test_result.close_button"
-        onClick={onDismiss}
-        aria-label="Dismiss"
-        className="text-muted-foreground hover:text-foreground transition-colors"
-      >
-        <X size={14} />
-      </button>
-    </div>
-  );
-}
-
-// ---- Error banner ----
-function TestErrorBanner({
-  message,
-  onDismiss,
-}: {
-  message: string;
-  onDismiss: () => void;
-}) {
-  return (
-    <div
-      data-ocid="correlation.test_result.error_state"
-      className="rounded-md border border-destructive/50 bg-destructive/10 px-4 py-3 flex items-start gap-3"
-    >
-      <AlertTriangle size={15} className="text-destructive shrink-0 mt-0.5" />
-      <p className="flex-1 text-sm text-destructive font-mono">{message}</p>
-      <button
-        type="button"
-        data-ocid="correlation.test_error.close_button"
-        onClick={onDismiss}
-        aria-label="Dismiss"
-        className="text-destructive/70 hover:text-destructive transition-colors"
-      >
-        <X size={14} />
-      </button>
-    </div>
-  );
-}
-
 // ---- Main Page ----
 export default function CorrelationPage() {
-  const seedAndTest = useSeedAndTestCorrelation();
   const [selectedIncident, setSelectedIncident] =
     useState<CorrelatedIncident | null>(null);
-  const [testResult, setTestResult] = useState<CorrelatedIncident[] | null>(
-    null,
-  );
-  const [testError, setTestError] = useState<string | null>(null);
-
-  const handleTest = async () => {
-    setTestResult(null);
-    setTestError(null);
-    try {
-      const incidents = await seedAndTest.mutateAsync();
-      setTestResult(incidents);
-    } catch (err) {
-      setTestError(
-        err instanceof Error ? err.message : "Correlation test failed",
-      );
-    }
-  };
 
   return (
     <Layout>
@@ -745,34 +645,7 @@ export default function CorrelationPage() {
               Cross-cloud attack pattern detection and incident correlation
             </p>
           </div>
-          <button
-            type="button"
-            data-ocid="correlation.test_button"
-            disabled={seedAndTest.isPending}
-            onClick={handleTest}
-            className="flex items-center gap-2 rounded-md border border-primary/40 bg-primary/10 px-4 py-2 text-sm font-semibold text-primary hover:bg-primary/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <GitMerge
-              size={14}
-              className={seedAndTest.isPending ? "animate-spin" : ""}
-            />
-            {seedAndTest.isPending ? "Running…" : "Test Correlation"}
-          </button>
         </div>
-
-        {/* Test result banner */}
-        {testResult && (
-          <TestResultBanner
-            incidents={testResult}
-            onDismiss={() => setTestResult(null)}
-          />
-        )}
-        {testError && (
-          <TestErrorBanner
-            message={testError}
-            onDismiss={() => setTestError(null)}
-          />
-        )}
 
         {/* Stats row */}
         <StatsRow />

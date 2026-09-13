@@ -24,6 +24,16 @@ export interface SearchResult {
     sourceModule: string;
     severity?: Severity;
 }
+export type Result_2 = {
+    __kind__: "ok";
+    ok: {
+        csvData: string;
+        reportId: string;
+    };
+} | {
+    __kind__: "err";
+    err: string;
+};
 export interface TransformationOutput {
     status: bigint;
     body: Uint8Array;
@@ -37,6 +47,11 @@ export interface HttpRequestResult {
     status: bigint;
     body: Uint8Array;
     headers: Array<HttpHeader>;
+}
+export type VaultSecretName = string;
+export interface Result__1 {
+    hasMore: boolean;
+    rows: Array<Array<Cell>>;
 }
 export interface CorrelatedIncident {
     status: IncidentStatus;
@@ -54,16 +69,12 @@ export interface CorrelatedIncident {
     correlationWindowMinutes: bigint;
     incidentType: string;
 }
-export interface Result__1 {
-    hasMore: boolean;
-    rows: Array<Array<Cell>>;
-}
 export type Result_1 = {
     __kind__: "ok";
     ok: string;
 } | {
     __kind__: "err";
-    err: string;
+    err: VaultError;
 };
 export interface NotificationLog {
     id: string;
@@ -77,6 +88,16 @@ export interface NotificationLog {
     timestamp: bigint;
     channel: NotificationChannel;
 }
+export interface TimelineEvent {
+    id: string;
+    title: string;
+    provider?: ProviderType;
+    customer: string;
+    description: string;
+    timestamp: bigint;
+    severity?: Severity;
+    eventType: string;
+}
 export interface GeneratedReport {
     csvData?: string;
     customer: string;
@@ -89,16 +110,23 @@ export interface GeneratedReport {
     reportId: string;
     format: string;
 }
-export interface TimelineEvent {
-    id: string;
-    title: string;
-    provider?: ProviderType;
-    customer: string;
+export interface MitreDetail {
+    techniqueName: string;
+    tacticName: string;
+    mitigations: string;
     description: string;
-    timestamp: bigint;
-    severity?: Severity;
-    eventType: string;
 }
+export interface TransformationInput {
+    context: Uint8Array;
+    response: HttpRequestResult;
+}
+export type ConnectionTestResult = {
+    __kind__: "Success";
+    Success: string;
+} | {
+    __kind__: "Failure";
+    Failure: string;
+};
 export interface ComplianceControl {
     status: ControlStatus;
     title: string;
@@ -110,39 +138,9 @@ export interface ComplianceControl {
     remediationGuidance: string;
     passingFindings: bigint;
 }
-export interface TransformationInput {
-    context: Uint8Array;
-    response: HttpRequestResult;
-}
-export interface MitreDetail {
-    techniqueName: string;
-    tacticName: string;
-    mitigations: string;
-    description: string;
-}
-export type ConnectionTestResult = {
-    __kind__: "Success";
-    Success: string;
-} | {
-    __kind__: "Failure";
-    Failure: string;
-};
 export interface Cell {
     value: Value;
     name: string;
-}
-export interface Asset {
-    id: string;
-    region: string;
-    provider: ProviderType;
-    accountId: string;
-    customer: string;
-    name: string;
-    tags: Array<[string, string]>;
-    assetType: AssetType;
-    lastSeen: bigint;
-    riskScore: bigint;
-    openFindings: bigint;
 }
 export type Value = {
     __kind__: "int";
@@ -209,6 +207,19 @@ export interface ComplianceTrendEntry {
     score: bigint;
     weekTimestamp: bigint;
 }
+export interface Asset {
+    id: string;
+    region: string;
+    provider: ProviderType;
+    accountId: string;
+    customer: string;
+    name: string;
+    tags: Array<[string, string]>;
+    assetType: AssetType;
+    lastSeen: bigint;
+    riskScore: bigint;
+    openFindings: bigint;
+}
 export interface AlertRule {
     id: string;
     region?: string;
@@ -237,11 +248,6 @@ export interface IngestionStats {
     activeProviders: bigint;
     totalFindingsToday: bigint;
 }
-export interface AwsCredentials {
-    externalId?: string;
-    roleArn: string;
-    regions: Array<string>;
-}
 export interface NormalizedAlert {
     id: string;
     region?: string;
@@ -264,10 +270,6 @@ export interface NormalizedAlert {
     severity: Severity;
     enrichment?: AlertEnrichment;
 }
-export interface HttpHeader {
-    value: string;
-    name: string;
-}
 export interface RawFinding {
     id: string;
     region?: string;
@@ -285,38 +287,43 @@ export interface MitreTag {
     technique: string;
     tactic: string;
 }
-export interface GcpCredentials {
-    serviceAccountJson: string;
-    projectIds: Array<string>;
+export interface HttpHeader {
+    value: string;
+    name: string;
 }
-export type Result = {
-    __kind__: "ok";
-    ok: {
-        csvData: string;
-        reportId: string;
-    };
-} | {
-    __kind__: "err";
-    err: string;
-};
 export interface CorrelationStats {
     totalAllTime: bigint;
     byType: Array<[string, bigint]>;
     totalToday: bigint;
     totalThisWeek: bigint;
 }
-export interface AzureCredentials {
-    clientId: string;
-    subscriptionIds: Array<string>;
-    tenantId: string;
-    clientSecret: string;
-}
+export type Result = {
+    __kind__: "ok";
+    ok: null;
+} | {
+    __kind__: "err";
+    err: VaultError;
+};
+export type Result_3 = {
+    __kind__: "ok";
+    ok: string;
+} | {
+    __kind__: "err";
+    err: string;
+};
 export interface AlertEnrichment {
     domainRep?: DomainRep;
     knownMaliciousIp: boolean;
     ipReputation?: IpReputation;
     enrichedAt?: string;
     mitreDetail?: MitreDetail;
+}
+export interface VaultEntryView {
+    provider: ProviderType;
+    name: VaultSecretName;
+    createdAt: bigint;
+    updatedAt: bigint;
+    maskedValue: string;
 }
 export interface CredentialHealthStatus {
     provider: string;
@@ -405,6 +412,12 @@ export enum Variant_Poll_Webhook {
     Poll = "Poll",
     Webhook = "Webhook"
 }
+export enum VaultError {
+    NotFound = "NotFound",
+    NotAuthorized = "NotAuthorized",
+    AlreadyExists = "AlreadyExists",
+    InvalidName = "InvalidName"
+}
 export interface backendInterface {
     /**
      * / Acknowledge a notification log entry.
@@ -435,6 +448,11 @@ export interface backendInterface {
      */
     deleteReport(reportId: string, customer: string): Promise<void>;
     /**
+     * / Delete a named secret for a provider. Composes requireAuth and
+     * / writes an audit entry.
+     */
+    deleteVaultSecret(provider: ProviderType, name: VaultSecretName): Promise<Result>;
+    /**
      * / Disable an Azure AD user account via Microsoft Graph API.
      */
     disableAzureAdAccount(req: {
@@ -445,7 +463,7 @@ export interface backendInterface {
     /**
      * / Trigger enrichment for a specific alert on demand.
      */
-    enrichAlertPublic(alertId: string, customer: string): Promise<Result_1>;
+    enrichAlertPublic(alertId: string, customer: string): Promise<Result_3>;
     /**
      * / Escalate an alert to a full correlated incident and create a Halo ticket.
      */
@@ -483,7 +501,7 @@ export interface backendInterface {
         dateRangeStart: string;
         dateRangeEnd: string;
         reportType: string;
-    }): Promise<Result>;
+    }): Promise<Result_2>;
     /**
      * / Find a single alert by its ID.
      * / Requires the caller to be assigned to the alert's provider.
@@ -729,9 +747,19 @@ export interface backendInterface {
      */
     listUserAssignments(): Promise<Array<UserAssignmentView>>;
     /**
+     * / List all vault entries for a provider as masked views (never plaintext).
+     * / Composes requireAuth.
+     */
+    listVaultSecrets(provider: ProviderType): Promise<Array<VaultEntryView>>;
+    /**
      * / Admin: remove a single provider from a principal's access.
      */
     removeProviderAccess(principal: Principal, provider: ProviderType): Promise<void>;
+    /**
+     * / Reveal/decrypt a single secret value on demand. Composes
+     * / requireAuth and writes an audit entry recording the reveal.
+     */
+    revealVaultSecret(provider: ProviderType, name: VaultSecretName): Promise<Result_1>;
     /**
      * / Revoke IAM credentials for a user/service account across providers.
      */
@@ -747,14 +775,6 @@ export interface backendInterface {
      */
     saveAlertRule(rule: AlertRule): Promise<boolean>;
     /**
-     * / Store AWS credentials (role ARN + optional external ID + regions) in the canister.
-     */
-    saveAwsCredentials(creds: AwsCredentials): Promise<void>;
-    /**
-     * / Store Azure credentials (client ID/secret/tenant + subscriptions) in the canister.
-     */
-    saveAzureCredentials(creds: AzureCredentials): Promise<void>;
-    /**
      * / Save enrichment API keys (AbuseIPDB and VirusTotal).
      * / Key values are never returned to the frontend.
      */
@@ -762,10 +782,6 @@ export interface backendInterface {
         virusTotalKey?: string;
         abuseIpdbKey?: string;
     }): Promise<void>;
-    /**
-     * / Store GCP credentials (service account JSON + project IDs) in the canister.
-     */
-    saveGcpCredentials(creds: GcpCredentials): Promise<void>;
     /**
      * / Save (upsert) a report email configuration.
      */
@@ -775,16 +791,16 @@ export interface backendInterface {
         recipients: Array<string>;
     }): Promise<void>;
     /**
+     * / Store a new named secret for a provider. Encrypted at rest; the value is
+     * / never returned. Composes requireAuth and writes an audit entry.
+     */
+    saveVaultSecret(provider: ProviderType, name: VaultSecretName, value: string): Promise<Result>;
+    /**
      * / Save the webhook signature secret for a provider.
      * / The secret value is stored write-only and is never returned to the frontend.
      */
     saveWebhookSecret(provider: ProviderType, secret: string): Promise<void>;
     schema(): Promise<string>;
-    /**
-     * / Seed 4 mock normalized alerts (idempotent) and run the correlation engine.
-     * / Returns the newly detected correlated incidents. Gated behind auth.
-     */
-    seedMockAlertsAndRunCorrelation(): Promise<Array<CorrelatedIncident>>;
     /**
      * / Update the polling interval for a specific provider.
      */
@@ -814,4 +830,9 @@ export interface backendInterface {
      * / Update status, owner, and/or notes on a correlated incident. Returns true if found.
      */
     updateCorrelatedIncidentStatus(id: string, newStatus: IncidentStatus, owner: string | null, notes: string | null): Promise<boolean>;
+    /**
+     * / Update an existing named secret for a provider. Composes
+     * / requireAuth and writes an audit entry.
+     */
+    updateVaultSecret(provider: ProviderType, name: VaultSecretName, value: string): Promise<Result>;
 }
