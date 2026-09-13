@@ -58,6 +58,16 @@
     --chart-4: 0.83 0.19 84;
     --chart-5: 0.77 0.19 70;
 
+    --aws: 0.62 0.17 55;
+    --aws-foreground: 0.98 0.01 55;
+    --aws-soft: 0.94 0.03 55;
+    --azure: 0.5 0.18 250;
+    --azure-foreground: 0.98 0.01 250;
+    --azure-soft: 0.94 0.03 250;
+    --gcp: 0.55 0.16 160;
+    --gcp-foreground: 0.98 0.01 160;
+    --gcp-soft: 0.94 0.03 160;
+
     --sidebar: 0.98 0 0;
     --sidebar-foreground: 0.15 0 0;
     --sidebar-primary: 0.35 0 0;
@@ -100,6 +110,16 @@
     --chart-4: 0.65 0.19 70;
     --chart-5: 0.58 0.2 40;
 
+    --aws: 0.72 0.17 55;
+    --aws-foreground: 0.14 0.02 55;
+    --aws-soft: 0.2 0.04 55;
+    --azure: 0.62 0.19 250;
+    --azure-foreground: 0.12 0.02 250;
+    --azure-soft: 0.18 0.04 250;
+    --gcp: 0.68 0.16 160;
+    --gcp-foreground: 0.13 0.02 160;
+    --gcp-soft: 0.19 0.04 160;
+
     --sidebar: 0.14 0 0;
     --sidebar-foreground: 0.96 0 0;
     --sidebar-primary: 0.52 0.255 220;
@@ -122,6 +142,70 @@
   .transition-smooth {
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   }
+
+  /* Provider identity shell: top accent bar + tinted surface so each
+     provider dashboard reads unmistakably distinct at a glance. */
+  .provider-shell {
+    position: relative;
+    border: 1px solid oklch(var(--border));
+    border-radius: var(--radius);
+    background: oklch(var(--card) / 0.6);
+    overflow: hidden;
+  }
+
+  .provider-shell::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 3px;
+    background: var(--provider-accent, oklch(var(--primary)));
+  }
+
+  .provider-tint {
+    background: var(--provider-soft, oklch(var(--muted) / 0.5));
+  }
+
+  .provider-accent {
+    color: var(--provider-accent, oklch(var(--primary)));
+  }
+
+  .provider-accent-bar {
+    background: var(--provider-accent, oklch(var(--primary)));
+  }
+
+  /* Per-provider accent binding — frontend sets these vars on the
+     dashboard shell for the active provider. */
+  .provider-aws {
+    --provider-accent: oklch(var(--aws));
+    --provider-soft: oklch(var(--aws-soft) / 0.6);
+  }
+  .provider-azure {
+    --provider-accent: oklch(var(--azure));
+    --provider-soft: oklch(var(--azure-soft) / 0.6);
+  }
+  .provider-gcp {
+    --provider-accent: oklch(var(--gcp));
+    --provider-soft: oklch(var(--gcp-soft) / 0.6);
+  }
+
+  .badge-provider {
+    background-color: var(--provider-soft, oklch(var(--muted) / 0.5));
+    border: 1px solid var(--provider-accent, oklch(var(--primary)));
+    color: var(--provider-accent, oklch(var(--primary)));
+    border-radius: 0.25rem;
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    font-family: var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.025em;
+  }
+
+  .nav-provider-active {
+    background-color: var(--provider-soft, oklch(var(--muted) / 0.5));
+    color: var(--provider-accent, oklch(var(--primary)));
+    border-left: 3px solid var(--provider-accent, oklch(var(--primary)));
+  }
 }
 
 @theme {
@@ -129,6 +213,16 @@
   --success-foreground: 0.12 0 0;
   --warning: 0.65 0.19 70;
   --warning-foreground: 0.12 0 0;
+
+  --color-aws: oklch(var(--aws));
+  --color-aws-foreground: oklch(var(--aws-foreground));
+  --color-aws-soft: oklch(var(--aws-soft));
+  --color-azure: oklch(var(--azure));
+  --color-azure-foreground: oklch(var(--azure-foreground));
+  --color-azure-soft: oklch(var(--azure-soft));
+  --color-gcp: oklch(var(--gcp));
+  --color-gcp-foreground: oklch(var(--gcp-foreground));
+  --color-gcp-soft: oklch(var(--gcp-soft));
 }
 
 .badge-status-connected {

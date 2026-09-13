@@ -123,7 +123,7 @@ module {
     assets : [(Text, Asset)],
     alerts : [(Text, NormalizedAlert)],
   ) : [(Text, Asset)] {
-    assets.map<(Text, Asset), (Text, Asset)>(
+    assets.map(
       func((assetId, asset)) {
         // Collect open/in-progress alerts targeting this asset
         let openAlerts = alerts.filter(

@@ -66,6 +66,21 @@ export default {
           border: "oklch(var(--sidebar-border))",
           ring: "oklch(var(--sidebar-ring))",
         },
+        aws: {
+          DEFAULT: "oklch(var(--aws) / <alpha-value>)",
+          foreground: "oklch(var(--aws-foreground))",
+          soft: "oklch(var(--aws-soft) / <alpha-value>)",
+        },
+        azure: {
+          DEFAULT: "oklch(var(--azure) / <alpha-value>)",
+          foreground: "oklch(var(--azure-foreground))",
+          soft: "oklch(var(--azure-soft) / <alpha-value>)",
+        },
+        gcp: {
+          DEFAULT: "oklch(var(--gcp) / <alpha-value>)",
+          foreground: "oklch(var(--gcp-foreground))",
+          soft: "oklch(var(--gcp-soft) / <alpha-value>)",
+        },
       },
       fontFamily: {
         display: ["var(--font-display)", "serif"],
@@ -79,6 +94,7 @@ export default {
       },
       boxShadow: {
         xs: "0 1px 2px 0 rgba(0,0,0,0.05)",
+        "provider-glow": "0 0 0 1px oklch(var(--provider-accent, oklch(var(--primary))) / 0.25)",
       },
       keyframes: {
         "accordion-down": {
@@ -89,10 +105,15 @@ export default {
           from: { height: "var(--radix-accordion-content-height)" },
           to: { height: "0" },
         },
+        "provider-pulse": {
+          "0%, 100%": { opacity: "1" },
+          "50%": { opacity: "0.4" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
+        "provider-pulse": "provider-pulse 2s ease-in-out infinite",
       },
     },
   },

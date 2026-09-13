@@ -103,6 +103,19 @@ export interface ReportEmailConfig {
 }
 
 export type ProviderType = "AWS" | "Azure" | "GCP";
+
+// Per-provider access control — mirrors backend UserAssignmentView
+export interface UserAssignmentView {
+  principal: string;
+  providers: ProviderType[];
+}
+
+// Webhook secret status — booleans only, never the secret value
+export interface WebhookSecretStatus {
+  awsSet: boolean;
+  azureSet: boolean;
+  gcpSet: boolean;
+}
 export type Severity = "Low" | "Medium" | "High" | "Critical" | "Unknown";
 export type PollingInterval =
   | "FiveMin"

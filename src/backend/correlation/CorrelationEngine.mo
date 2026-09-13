@@ -225,7 +225,7 @@ module {
 
       // Update per-type count
       var found = false;
-      typeCounts := typeCounts.map<(Text, Nat), (Text, Nat)>(
+      typeCounts := typeCounts.map(
         func((t, c)) {
           if (t == inc.incidentType) { found := true; (t, c + 1) } else (t, c);
         },

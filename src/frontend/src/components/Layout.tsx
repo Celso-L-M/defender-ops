@@ -22,6 +22,7 @@ import {
   Settings2,
   Shield,
   ShieldAlert,
+  ShieldCheck,
   XCircle,
 } from "lucide-react";
 import React from "react";
@@ -33,18 +34,44 @@ import {
   useAssets,
   useComplianceStatus,
   useCorrelatedIncidents,
+  useGetMyProviders,
   useGlobalSearch,
   useNormalizedAlerts,
   usePipelineHealth,
 } from "../hooks/use-backend";
+import type { ProviderType } from "../types";
+
+const providerNav: {
+  provider: ProviderType;
+  to: string;
+  label: string;
+  ocid: string;
+  accentClass: string;
+}[] = [
+  {
+    provider: "AWS",
+    to: "/providers/aws",
+    label: "AWS",
+    ocid: "nav.provider_aws_link",
+    accentClass: "provider-aws",
+  },
+  {
+    provider: "Azure",
+    to: "/providers/azure",
+    label: "Azure",
+    ocid: "nav.provider_azure_link",
+    accentClass: "provider-azure",
+  },
+  {
+    provider: "GCP",
+    to: "/providers/gcp",
+    label: "GCP",
+    ocid: "nav.provider_gcp_link",
+    accentClass: "provider-gcp",
+  },
+];
 
 const navLinks = [
-  {
-    to: "/",
-    label: "Dashboard",
-    icon: LayoutDashboard,
-    ocid: "nav.dashboard_link",
-  },
   {
     to: "/settings",
     label: "Cloud Settings",
@@ -279,22 +306,39 @@ export function Layout({ children }: Props) {
   const pathname = routerState.location.pathname;
   const isLoggedIn = !!identity;
   const { data: pipelineHealth } = usePipelineHealth();
+  const { data: myProviders } = useGetMyProviders();
   const { selectedProvider, setSelectedProvider } = useProviderFilter();
   const totalFailedIngestions = pipelineHealth
     ? pipelineHealth.reduce((sum, s) => sum + Number(s.failedIngestionCount), 0)
     : 0;
 
+  const assignedProviders = React.useMemo(
+    () => new Set(myProviders ?? []),
+    [myProviders],
+  );
+  const visibleProviderNav = providerNav.filter((p) =>
+    assignedProviders.has(p.provider),
+  );
+
   const sidebarW = collapsed ? "w-14" : "w-56";
 
   const activeLabel =
-    navLinks.find((l) =>
-      l.to === "/" ? pathname === "/" : pathname.startsWith(l.to),
-    )?.label ??
-    (pathname.startsWith("/failed-ingestions")
-      ? "Failed Ingestions"
-      : pathname.startsWith("/assets/")
-        ? "Asset Inventory"
-        : "Overview");
+    pathname === "/"
+      ? "Provider Overview"
+      : pathname.startsWith("/providers/aws")
+        ? "AWS Dashboard"
+        : pathname.startsWith("/providers/azure")
+          ? "Azure Dashboard"
+          : pathname.startsWith("/providers/gcp")
+            ? "GCP Dashboard"
+            : pathname.startsWith("/provider-access")
+              ? "Provider Access"
+              : (navLinks.find((l) => pathname.startsWith(l.to))?.label ??
+                (pathname.startsWith("/failed-ingestions")
+                  ? "Failed Ingestions"
+                  : pathname.startsWith("/assets/")
+                    ? "Asset Inventory"
+                    : "Overview"));
 
   return (
     <ProviderFilterProvider>
@@ -320,6 +364,63 @@ export function Layout({ children }: Props) {
 
           {/* Nav */}
           <nav className="flex-1 py-3 space-y-0.5 px-2 overflow-y-auto">
+            {/* Providers section */}
+            {!collapsed && (
+              <p className="px-2.5 pb-1 pt-1 font-mono text-[10px] text-muted-foreground uppercase tracking-widest">
+                Providers
+              </p>
+            )}
+            <Link
+              to="/"
+              data-ocid="nav.provider_overview_link"
+              className={`flex items-center gap-3 rounded-md px-2.5 py-2 text-sm font-medium transition-smooth group
+                ${
+                  pathname === "/"
+                    ? "bg-primary/15 text-primary border border-primary/25"
+                    : "text-muted-foreground hover:bg-muted/40 hover:text-foreground border border-transparent"
+                }`}
+            >
+              <LayoutDashboard
+                size={16}
+                className={`shrink-0 ${
+                  pathname === "/"
+                    ? "text-primary"
+                    : "text-muted-foreground group-hover:text-foreground"
+                }`}
+              />
+              {!collapsed && <span className="truncate">Overview</span>}
+            </Link>
+            {visibleProviderNav.map(
+              ({ provider, to, label, ocid, accentClass }) => {
+                const isActive = pathname.startsWith(to);
+                return (
+                  <Link
+                    key={provider}
+                    to={to}
+                    data-ocid={ocid}
+                    className={`${accentClass} flex items-center gap-3 rounded-md px-2.5 py-2 text-sm font-medium transition-smooth group border border-transparent
+                    ${
+                      isActive
+                        ? "nav-provider-active"
+                        : "text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+                    }`}
+                  >
+                    <span
+                      className={`h-2 w-2 shrink-0 rounded-full provider-accent-bar ${
+                        isActive ? "" : "opacity-60"
+                      }`}
+                    />
+                    {!collapsed && <span className="truncate">{label}</span>}
+                  </Link>
+                );
+              },
+            )}
+
+            {!collapsed && (
+              <p className="px-2.5 pb-1 pt-4 font-mono text-[10px] text-muted-foreground uppercase tracking-widest">
+                Operations
+              </p>
+            )}
             {navLinks.map(({ to, label, icon: Icon, ocid }) => {
               const isActive =
                 to === "/" ? pathname === "/" : pathname.startsWith(to);
@@ -388,6 +489,38 @@ export function Layout({ children }: Props) {
                 </Link>
               );
             })()}
+            {/* Admin section — Provider Access (admin-gated) */}
+            {isLoggedIn && (
+              <>
+                {!collapsed && (
+                  <p className="px-2.5 pb-1 pt-4 font-mono text-[10px] text-muted-foreground uppercase tracking-widest">
+                    Admin
+                  </p>
+                )}
+                <Link
+                  to="/provider-access"
+                  data-ocid="nav.provider_access_link"
+                  className={`flex items-center gap-3 rounded-md px-2.5 py-2 text-sm font-medium transition-smooth group
+                    ${
+                      pathname.startsWith("/provider-access")
+                        ? "bg-primary/15 text-primary border border-primary/25"
+                        : "text-muted-foreground hover:bg-muted/40 hover:text-foreground border border-transparent"
+                    }`}
+                >
+                  <ShieldCheck
+                    size={16}
+                    className={`shrink-0 ${
+                      pathname.startsWith("/provider-access")
+                        ? "text-primary"
+                        : "text-muted-foreground group-hover:text-foreground"
+                    }`}
+                  />
+                  {!collapsed && (
+                    <span className="truncate">Provider Access</span>
+                  )}
+                </Link>
+              </>
+            )}
           </nav>
 
           {/* Collapse toggle */}

@@ -257,7 +257,7 @@ module {
 
   /// Check if an IP is in the malicious feed.
   public func isKnownMalicious(ip : Text, feed : [Text]) : Bool {
-    feed.find<Text>(func(entry) { Text.equal(entry, ip) }) != null;
+    feed.find(func(entry) { Text.equal(entry, ip) }) != null;
   };
 
   // ── Main enrichment function ───────────────────────────────────────────────

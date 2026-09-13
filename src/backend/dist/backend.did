@@ -1,24 +1,27 @@
-type http_request_result = 
- record {
-   body: blob;
-   headers: vec http_header;
-   status: nat;
+type Value = 
+ variant {
+   "bool": bool;
+   float: float64;
+   "int": int;
+   "nat": nat;
+   "null";
+   "text": text;
  };
-type http_header = 
+type UserAssignmentView = 
  record {
-   name: text;
-   value: text;
+   "principal": text;
+   providers: vec ProviderType;
  };
 type TransformationOutput = 
  record {
    body: blob;
-   headers: vec http_header;
+   headers: vec HttpHeader;
    status: nat;
  };
 type TransformationInput = 
  record {
    context: blob;
-   response: http_request_result;
+   response: HttpRequestResult;
  };
 type TimelineEvent = 
  record {
@@ -58,6 +61,11 @@ type RuleSeverityThreshold =
    AnyLow;
    AnyMedium;
    CriticalOrHigh;
+ };
+type Result__1 = 
+ record {
+   hasMore: bool;
+   rows: vec vec Cell;
  };
 type Result_1 = 
  variant {
@@ -208,6 +216,17 @@ type IncidentStatus =
    Open;
    Resolved;
  };
+type HttpRequestResult = 
+ record {
+   body: blob;
+   headers: vec HttpHeader;
+   status: nat;
+ };
+type HttpHeader = 
+ record {
+   name: text;
+   value: text;
+ };
 type GeneratedReport = 
  record {
    csvData: opt text;
@@ -314,6 +333,11 @@ type ComplianceControl =
    status: ControlStatus;
    title: text;
  };
+type Cell = 
+ record {
+   name: text;
+   value: Value;
+ };
 type AzureCredentials = 
  record {
    clientId: text;
@@ -400,6 +424,11 @@ type AlertEnrichment =
 service : {
   /// Acknowledge a notification log entry.
   acknowledgeNotification: (logId: text) -> (bool);
+  /// Admin: assign (replace) the full set of providers a principal may access.
+  /// Composes with the existing requireAuth guard (rejects anonymous callers).
+  /// ProviderType is a closed variant, so every element is a known provider.
+  assignProviderAccess: ("principal": principal, providers:
+   vec ProviderType) -> ();
   /// Block an IP address across one or more cloud providers.
   /// dryRun=true returns a preview without making any API calls.
   blockIp: (req:
@@ -432,6 +461,7 @@ service : {
      notes: opt text;
      severity: text;
    }) -> (PlaybookResult);
+  execute: (qJson: text) -> (Result__1) query;
   /// Export compliance report as CSV text.
   exportComplianceCsv: (framework: ComplianceFramework) -> (text) query;
   /// Export compliance report as PDF blob.
@@ -453,17 +483,23 @@ service : {
      reportType: text;
    }) -> (Result);
   /// Find a single alert by its ID.
+  /// Requires the caller to be assigned to the alert's provider.
   getAlertById: (id: text) -> (opt NormalizedAlert) query;
   /// Return all alert rules for a given customer.
   getAlertRules: (customer: text) -> (vec AlertRule) query;
   /// Return normalized alerts whose id matches any entry in alertIds.
+  /// Scoped to the providers the caller is assigned to.
   getAlertsForCorrelation: (alertIds: vec text) ->
    (vec NormalizedAlert) query;
+  getApiDoc: () -> (text) query;
   /// Find a single asset by its ID.
+  /// Requires the caller to be assigned to the asset's provider.
   getAssetById: (id: text) -> (opt Asset) query;
   /// Return all open/in-progress normalized alerts for a given asset.
+  /// Scoped to the providers the caller is assigned to.
   getAssetFindings: (assetId: text) -> (vec NormalizedAlert) query;
   /// Return assets matching the provided filter criteria.
+  /// Scoped to the providers the caller is assigned to.
   getAssets: (filter:
    record {
      assetType: opt AssetType;
@@ -479,6 +515,7 @@ service : {
   getComplianceControlGaps: (framework: ComplianceFramework) ->
    (vec ComplianceControl) query;
   /// Return compliance status for a framework, counting passing/failing findings per control.
+  /// Scoped to the providers the caller is assigned to.
   getComplianceStatus: (framework: ComplianceFramework, provider:
    opt ProviderType) ->
    (record {
@@ -492,17 +529,21 @@ service : {
   getComplianceTrend: (framework: ComplianceFramework) ->
    (vec ComplianceTrendEntry) query;
   /// Return a correlated incident by its incidentId, or null if not found.
+  /// Requires the caller to be assigned to one of the incident's source providers.
   getCorrelatedIncidentById: (id: text) -> (opt CorrelatedIncident) query;
   /// Return the most recent `limit` correlated incidents sorted by detectedAt descending.
+  /// Scoped to incidents touching providers the caller is assigned to.
   getCorrelatedIncidents: (limit: nat) ->
    (vec record {
           text;
           CorrelatedIncident;
         }) query;
   /// Return aggregated correlation statistics for the dashboard panel.
+  /// Scoped to incidents touching providers the caller is assigned to.
   getCorrelationStats: () -> (CorrelationStats) query;
   /// Return the health status of each provider's credentials.
   /// Checks in-memory token cache expiry; no network call.
+  /// Scoped to the providers the caller is assigned to.
   getCredentialHealth: () -> (vec CredentialHealthStatus) query;
   /// Return which enrichment keys are configured (booleans only — never the key values).
   getEnrichmentKeys: () ->
@@ -512,6 +553,7 @@ service : {
     });
   /// Return failed ingestion records, optionally filtered by provider.
   /// provider field is returned as Text to avoid Candid variant decoding issues on the frontend.
+  /// Scoped to the providers the caller is assigned to.
   getFailedIngestions: (provider: opt ProviderType, limit: nat) ->
    (vec
      record {
@@ -524,8 +566,12 @@ service : {
        timestamp: int;
      }) query;
   /// Return aggregated ingestion statistics for the dashboard.
+  /// Scoped to the providers the caller is assigned to.
   getIngestionStats: () -> (IngestionStats) query;
+  /// Frontend: read the current caller's assigned providers.
+  getMyProviders: () -> (vec ProviderType) query;
   /// Return normalized alerts matching the provided filter criteria.
+  /// Scoped to the providers the caller is assigned to.
   getNormalizedAlerts: (filter:
    record {
      customer: text;
@@ -541,6 +587,7 @@ service : {
                                 }) -> (vec NotificationLog) query;
   /// Return per-provider pipeline health stats for the dashboard.
   /// provider field is returned as Text to avoid Candid variant decoding issues on the frontend.
+  /// Scoped to the providers the caller is assigned to.
   getPipelineHealth: () ->
    (vec
      record {
@@ -552,9 +599,11 @@ service : {
        webhookEventsToday: nat;
      }) query;
   /// Return per-provider polling state (status, last poll time, error info).
+  /// Scoped to the providers the caller is assigned to.
   getProviderStates: () -> (vec ProviderPollingState) query;
   /// Return paginated raw findings for a given provider.
   /// limit: max items to return (default 100, max 500). offset: starting index.
+  /// Requires the caller to be assigned to the requested provider.
   getRawFindings: (provider: ProviderType, limit: nat, offset: nat) ->
    (record {
       hasMore: bool;
@@ -572,8 +621,18 @@ service : {
   /// Return the list of generated reports for a customer (without CSV data).
   getReports: (customer: text) -> (vec GeneratedReport);
   /// Return recent timeline events for a customer, sorted by timestamp descending.
+  /// Scoped to the providers the caller is assigned to.
   getTimeline: (customer: text, limit: nat) -> (vec TimelineEvent) query;
+  /// Return which providers have a webhook secret configured (booleans only —
+  /// never the secret values).
+  getWebhookSecretStatus: () ->
+   (record {
+      awsSet: bool;
+      azureSet: bool;
+      gcpSet: bool;
+    });
   /// Return aggregated webhook statistics for the dashboard.
+  /// Scoped to the providers the caller is assigned to.
   getWebhookStats: () ->
    (record {
       webhookEventsToday: nat;
@@ -581,6 +640,7 @@ service : {
     }) query;
   /// Search across alerts, assets, and audit log.
   /// maxResults: cap total results (default 100, max 500). hasMore indicates truncation.
+  /// Scoped to the providers the caller is assigned to.
   globalSearch: ("query": text, customer: text, maxResults: nat) ->
    (record {
       hasMore: bool;
@@ -636,6 +696,11 @@ service : {
      provider: ProviderType;
      resourceId: text;
    }) -> (PlaybookResult);
+  /// Admin: list all users and their provider assignments.
+  listUserAssignments: () -> (vec UserAssignmentView) query;
+  /// Admin: remove a single provider from a principal's access.
+  removeProviderAccess: ("principal": principal, provider: ProviderType) ->
+   ();
   /// Revoke IAM credentials for a user/service account across providers.
   revokeIamCredentials: (req:
    record {
@@ -667,6 +732,10 @@ service : {
      recipients: vec text;
      reportType: text;
    }) -> ();
+  /// Save the webhook signature secret for a provider.
+  /// The secret value is stored write-only and is never returned to the frontend.
+  saveWebhookSecret: (provider: ProviderType, secret: text) -> ();
+  schema: () -> (text) query;
   /// Seed 4 mock normalized alerts (idempotent) and run the correlation engine.
   /// Returns the newly detected correlated incidents. Gated behind auth.
   seedMockAlertsAndRunCorrelation: () -> (vec CorrelatedIncident);

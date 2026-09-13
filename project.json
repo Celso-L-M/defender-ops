@@ -1,25 +1,17 @@
 {
-  "overview": "A multi-cloud SecOps platform with automated remediation playbooks, threat intelligence enrichment, and compliance reporting across AWS, Azure, and GCP.",
+  "overview": "Defender Ops is a multi-cloud SecOps platform that isolates AWS, Azure, and GCP into separate dashboards with per-provider access control so users only see and act on the providers they are assigned to.",
   "features": [
-    "Block IP, Isolate Resource, and Revoke IAM Credentials playbooks with dry-run mode",
-    "Threat intelligence enrichment using AbuseIPDB, VirusTotal, and MITRE ATT&CK",
-    "Known malicious IP auto-flagging from Emerging Threats blocklist",
-    "On-demand security reports (Security Posture, Compliance, Incident Summary, Threat Intel) with CSV export",
-    "Reports library page with download and email delivery configuration",
-    "OWASP-hardened backend with full audit trail and input validation",
-    "Real-time dashboard with risk score gauge, provider cards, correlated incidents, and quick actions"
+    "Dedicated AWS, Azure, and GCP dashboards showing only that provider's data",
+    "Provider overview landing page linking to each isolated dashboard",
+    "All data views scoped to the active provider to prevent cross-cloud leaks",
+    "Per-provider access control so users only see and act on assigned providers"
   ],
-  "category": "security-dashboard",
+  "category": "productivity",
   "tags": [
-    "secops",
+    "security",
     "multi-cloud",
-    "aws",
-    "azure",
-    "gcp",
-    "threat-intelligence",
-    "compliance",
-    "incident-response",
-    "remediation"
+    "secops",
+    "dashboard"
   ],
-  "last_updated": "2026-05-28T23:16:38.878Z"
+  "last_updated": "2026-09-13T01:28:14.728Z"
 }

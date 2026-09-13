@@ -7,7 +7,6 @@ import {
 import React, { Suspense } from "react";
 import { LoadingSpinner } from "./components/LoadingSpinner";
 
-const DashboardPage = React.lazy(() => import("./pages/DashboardPage"));
 const CloudSettingsPage = React.lazy(() => import("./pages/CloudSettingsPage"));
 const RawFindingsPage = React.lazy(() => import("./pages/RawFindingsPage"));
 const CompliancePage = React.lazy(() => import("./pages/CompliancePage"));
@@ -21,15 +20,66 @@ const FailedIngestionPage = React.lazy(
 );
 const CorrelationPage = React.lazy(() => import("./pages/CorrelationPage"));
 const ReportsPage = React.lazy(() => import("./pages/ReportsPage"));
+const ProviderOverviewPage = React.lazy(
+  () => import("./pages/ProviderOverviewPage"),
+);
+const AwsDashboardPage = React.lazy(() => import("./pages/AwsDashboardPage"));
+const AzureDashboardPage = React.lazy(
+  () => import("./pages/AzureDashboardPage"),
+);
+const GcpDashboardPage = React.lazy(() => import("./pages/GcpDashboardPage"));
+const ProviderAccessPage = React.lazy(
+  () => import("./pages/ProviderAccessPage"),
+);
 
 const rootRoute = createRootRoute();
 
-const dashboardRoute = createRoute({
+const overviewRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
   component: () => (
     <Suspense fallback={<LoadingSpinner className="h-screen" size={32} />}>
-      <DashboardPage />
+      <ProviderOverviewPage />
+    </Suspense>
+  ),
+});
+
+const awsDashboardRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/providers/aws",
+  component: () => (
+    <Suspense fallback={<LoadingSpinner className="h-screen" size={32} />}>
+      <AwsDashboardPage />
+    </Suspense>
+  ),
+});
+
+const azureDashboardRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/providers/azure",
+  component: () => (
+    <Suspense fallback={<LoadingSpinner className="h-screen" size={32} />}>
+      <AzureDashboardPage />
+    </Suspense>
+  ),
+});
+
+const gcpDashboardRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/providers/gcp",
+  component: () => (
+    <Suspense fallback={<LoadingSpinner className="h-screen" size={32} />}>
+      <GcpDashboardPage />
+    </Suspense>
+  ),
+});
+
+const providerAccessRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/provider-access",
+  component: () => (
+    <Suspense fallback={<LoadingSpinner className="h-screen" size={32} />}>
+      <ProviderAccessPage />
     </Suspense>
   ),
 });
@@ -144,7 +194,11 @@ const reportsRoute = createRoute({
 });
 
 const routeTree = rootRoute.addChildren([
-  dashboardRoute,
+  overviewRoute,
+  awsDashboardRoute,
+  azureDashboardRoute,
+  gcpDashboardRoute,
+  providerAccessRoute,
   settingsRoute,
   findingsRoute,
   complianceRoute,

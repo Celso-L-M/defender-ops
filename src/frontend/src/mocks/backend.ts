@@ -77,6 +77,27 @@ export const mockBackend: backendInterface = {
     },
   ],
 
+  getMyProviders: async () => [
+    ProviderType.AWS,
+    ProviderType.Azure,
+    ProviderType.GCP,
+  ],
+
+  listUserAssignments: async () => [
+    {
+      principal: "2vxsx-fae",
+      providers: [ProviderType.AWS, ProviderType.Azure, ProviderType.GCP],
+    },
+    {
+      principal: "aaaaa-aa",
+      providers: [ProviderType.AWS],
+    },
+  ],
+
+  assignProviderAccess: async () => undefined,
+
+  removeProviderAccess: async () => undefined,
+
   getRawFindings: async (_provider: ProviderType, _limit: bigint, _offset: bigint) => ({ hasMore: false, totalCount: BigInt(6), items: [
     {
       id: "raw-001",
@@ -369,8 +390,18 @@ export const mockBackend: backendInterface = {
 
   getEnrichmentKeys: async () => ({ abuseIpdbKeySet: false, virusTotalKeySet: false }),
 
+  saveWebhookSecret: async (_provider: ProviderType, _secret: string) => undefined,
+
+  getWebhookSecretStatus: async () => ({ awsSet: false, azureSet: false, gcpSet: false }),
+
   getReportEmailConfig: async (_customer: string) => [
     { reportType: "SecurityPosture", recipients: ["ciso@acme.com"] },
     { reportType: "ComplianceStatus", recipients: ["compliance@acme.com", "audit@acme.com"] },
   ],
+
+  execute: async () => ({ hasMore: false, rows: [] }),
+
+  getApiDoc: async () => "",
+
+  schema: async () => "",
 };

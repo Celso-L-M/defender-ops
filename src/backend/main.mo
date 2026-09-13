@@ -1,4 +1,5 @@
 import List "mo:core/List";
+import Map "mo:core/Map";
 import Array "mo:core/Array";
 import Time "mo:core/Time";
 import Int "mo:core/Int";
@@ -16,6 +17,7 @@ import Alerting "alerting/AlertingEngine";
 import WebhookHandler "webhook/WebhookHandler";
 import FailedIngestionStore "webhook/FailedIngestionStore";
 import PipelineMetrics "webhook/PipelineMetrics";
+import WebhookSignature "webhook/WebhookSignature";
 import Float "mo:core/Float";
 import CorrelationEngine "correlation/CorrelationEngine";
 import ThreatIntel "enrichment/ThreatIntelEnrichment";
@@ -23,6 +25,19 @@ import Principal "mo:core/Principal";
 import Runtime "mo:core/Runtime";
 import Option "mo:core/Option";
 import Result "mo:core/Result";
+import Expose "mo:caffeineai-oql/Expose";
+import Entity "mo:caffeineai-oql/Entity";
+import ListEntity "mo:caffeineai-oql/ListEntity";
+import ArrayEntity "mo:caffeineai-oql/ArrayEntity";
+import TextValue "mo:caffeineai-oql/TextValue";
+import NatValue "mo:caffeineai-oql/NatValue";
+import IntValue "mo:caffeineai-oql/IntValue";
+import FloatValue "mo:caffeineai-oql/FloatValue";
+import BoolValue "mo:caffeineai-oql/BoolValue";
+import Iter "mo:core/Iter";
+import ApiDocMixin "mixins/api-doc";
+import PerProviderAccessControlApi "mixins/per-provider-access-control-api";
+import PerProviderAccessControl "lib/per-provider-access-control";
 
 actor {
 
@@ -75,6 +90,11 @@ actor {
   // ── Phase 6 — Enrichment API keys (stable, never returned to frontend) ────
   var enrichmentApiKeys : { abuseIpdbKey : ?Text; virusTotalKey : ?Text };
 
+  // ── Webhook signature secrets (stable, write-only, never returned) ────────
+  // Per-provider shared secrets used to authenticate inbound webhook payloads.
+  // Settable by admins only; only configured/unconfigured status is exposed.
+  var webhookSecrets : { aws : ?Text; azure : ?Text; gcp : ?Text };
+
   // ── Phase 6 — Known malicious IP feed (stable, refreshed every 6h) ───────
   var maliciousIpFeed : [Text];
   var lastMaliciousIpFeedPoll : ?Int;
@@ -82,6 +102,11 @@ actor {
   // ── Phase 7 — Generated reports (stable) ─────────────────────────────────
   var generatedReports : [Types.GeneratedReport];
   var reportEmailConfigs : [Types.ReportEmailConfig];
+
+  // ── Per-provider access control (stable, initialised by migration chain) ──
+  // Maps each principal to the set of cloud providers they are assigned to.
+  // Users may only view and act on providers present in their list.
+  var providerAssignments : Map.Map<Principal, [Types.ProviderType]>;
 
   // ── In-memory token caches (NOT stable — discarded on restart) ────────────
   // Short-lived tokens are never written to stable memory per least-privilege policy
@@ -164,7 +189,7 @@ actor {
         rawPayload   = bodyText;
         timestamp    = nowNs;
         errorMessage = errMsg;
-        status       = "FailedParse";
+        status       = errorType;
       });
       PipelineMetrics.recordIngestionEvent(
         pipelineEvents, provider, #Webhook, false, 0.0, nowNs
@@ -203,53 +228,150 @@ actor {
       );
     };
 
+    // Helper: verify the inbound webhook signature for a provider against the
+    // configured write-only secret. Returns null when valid, or a rejection
+    // reason when the secret is unconfigured, the header is missing, or the
+    // signature/secret does not match. All comparisons are constant-time.
+    func verifyWebhookSignature(provider : Types.ProviderType) : ?Text {
+      switch (provider) {
+        case (#AWS) {
+          switch (webhookSecrets.aws) {
+            case null { ?"Webhook secret not configured" };
+            case (?secret) {
+              switch (WebhookSignature.findHeader(request.headers, "X-Amz-Signature")) {
+                case null { ?"Missing X-Amz-Signature header" };
+                case (?sig) {
+                  let expected = WebhookSignature.toHex(
+                    WebhookSignature.hmacSha256(secret.encodeUtf8(), request.body)
+                  );
+                  if (WebhookSignature.constantTimeEqual(expected, sig)) null
+                  else ?"Invalid signature";
+                };
+              };
+            };
+          };
+        };
+        case (#Azure) {
+          switch (webhookSecrets.azure) {
+            case null { ?"Webhook secret not configured" };
+            case (?secret) {
+              switch (WebhookSignature.findHeader(request.headers, "Aeg-Sas-Key")) {
+                case null { ?"Missing Aeg-Sas-Key header" };
+                case (?provided) {
+                  if (WebhookSignature.constantTimeEqual(secret, provided)) null
+                  else ?"Invalid shared secret";
+                };
+              };
+            };
+          };
+        };
+        case (#GCP) {
+          switch (webhookSecrets.gcp) {
+            case null { ?"Webhook secret not configured" };
+            case (?secret) {
+              switch (WebhookSignature.findHeader(request.headers, "Authorization")) {
+                case null { ?"Missing Authorization header" };
+                case (?auth) {
+                  let token = WebhookSignature.bearerToken(auth);
+                  if (WebhookSignature.constantTimeEqual(secret, token)) null
+                  else ?"Invalid shared secret";
+                };
+              };
+            };
+          };
+        };
+      };
+    };
+
     // Route on URL path
     if (request.url == "/webhook/aws" or request.url.startsWith(#text "/webhook/aws")) {
-      switch (WebhookHandler.parseGuardDutyPayload(bodyText)) {
-        case (#err(msg)) {
-          storeFailure(#AWS, "ParseError", msg);
+      switch (verifyWebhookSignature(#AWS)) {
+        case (?reason) {
+          storeFailure(#AWS, "Unauthorized", reason);
           return {
-            status_code        = 400;
+            status_code        = 401;
             headers            = responseHeaders;
-            body               = ("Bad Request: " # msg).encodeUtf8();
+            body               = ("Unauthorized: " # reason).encodeUtf8();
             streaming_strategy = null;
             upgrade            = null;
           };
         };
-        case (#ok(extracted)) {
-          storeRawOnly(#AWS, extracted);
+        case null {
+          switch (WebhookHandler.parseGuardDutyPayload(bodyText)) {
+            case (#err(msg)) {
+              storeFailure(#AWS, "ParseError", msg);
+              return {
+                status_code        = 400;
+                headers            = responseHeaders;
+                body               = ("Bad Request: " # msg).encodeUtf8();
+                streaming_strategy = null;
+                upgrade            = null;
+              };
+            };
+            case (#ok(extracted)) {
+              storeRawOnly(#AWS, extracted);
+            };
+          };
         };
       };
     } else if (request.url == "/webhook/azure" or request.url.startsWith(#text "/webhook/azure")) {
-      switch (WebhookHandler.parseAzureDefenderPayload(bodyText)) {
-        case (#err(msg)) {
-          storeFailure(#Azure, "ParseError", msg);
+      switch (verifyWebhookSignature(#Azure)) {
+        case (?reason) {
+          storeFailure(#Azure, "Unauthorized", reason);
           return {
-            status_code        = 400;
+            status_code        = 401;
             headers            = responseHeaders;
-            body               = ("Bad Request: " # msg).encodeUtf8();
+            body               = ("Unauthorized: " # reason).encodeUtf8();
             streaming_strategy = null;
             upgrade            = null;
           };
         };
-        case (#ok(extracted)) {
-          storeRawOnly(#Azure, extracted);
+        case null {
+          switch (WebhookHandler.parseAzureDefenderPayload(bodyText)) {
+            case (#err(msg)) {
+              storeFailure(#Azure, "ParseError", msg);
+              return {
+                status_code        = 400;
+                headers            = responseHeaders;
+                body               = ("Bad Request: " # msg).encodeUtf8();
+                streaming_strategy = null;
+                upgrade            = null;
+              };
+            };
+            case (#ok(extracted)) {
+              storeRawOnly(#Azure, extracted);
+            };
+          };
         };
       };
     } else if (request.url == "/webhook/gcp" or request.url.startsWith(#text "/webhook/gcp")) {
-      switch (WebhookHandler.parseGcpSccPayload(bodyText)) {
-        case (#err(msg)) {
-          storeFailure(#GCP, "ParseError", msg);
+      switch (verifyWebhookSignature(#GCP)) {
+        case (?reason) {
+          storeFailure(#GCP, "Unauthorized", reason);
           return {
-            status_code        = 400;
+            status_code        = 401;
             headers            = responseHeaders;
-            body               = ("Bad Request: " # msg).encodeUtf8();
+            body               = ("Unauthorized: " # reason).encodeUtf8();
             streaming_strategy = null;
             upgrade            = null;
           };
         };
-        case (#ok(extracted)) {
-          storeRawOnly(#GCP, extracted);
+        case null {
+          switch (WebhookHandler.parseGcpSccPayload(bodyText)) {
+            case (#err(msg)) {
+              storeFailure(#GCP, "ParseError", msg);
+              return {
+                status_code        = 400;
+                headers            = responseHeaders;
+                body               = ("Bad Request: " # msg).encodeUtf8();
+                streaming_strategy = null;
+                upgrade            = null;
+              };
+            };
+            case (#ok(extracted)) {
+              storeRawOnly(#GCP, extracted);
+            };
+          };
         };
       };
     } else {
@@ -457,6 +579,23 @@ actor {
     };
   };
 
+  // ── Per-provider access control enforcement ──────────────────────────────
+
+  /// Returns true if the caller is assigned to the given provider.
+  func isProviderAssigned(caller : Principal, provider : Types.ProviderType) : Bool {
+    PerProviderAccessControl.isAssignedToProvider(providerAssignments, caller, provider)
+  };
+
+  /// Composes requireAuth with per-provider membership: rejects anonymous
+  /// callers and callers not assigned to the given provider. Used to gate both
+  /// provider-scoped data reads and remediation actions.
+  func requireProviderAccess(caller : Principal, provider : Types.ProviderType, fnName : Text) {
+    requireAuth(caller, fnName);
+    if (not isProviderAssigned(caller, provider)) {
+      Runtime.trap("Not authorized for provider");
+    };
+  };
+
   // ── Credential Management ────────────────────────────────────────────────
 
   /// Store AWS credentials (role ARN + optional external ID + regions) in the canister.
@@ -486,23 +625,34 @@ actor {
   // ── Polling State & Stats ─────────────────────────────────────────────────
 
   /// Return per-provider polling state (status, last poll time, error info).
-  public query func getProviderStates() : async [Types.ProviderPollingState] {
-    [awsPollingState, azurePollingState, gcpPollingState];
+  /// Scoped to the providers the caller is assigned to.
+  public shared query ({ caller }) func getProviderStates() : async [Types.ProviderPollingState] {
+    [awsPollingState, azurePollingState, gcpPollingState].filter(func(s) {
+      isProviderAssigned(caller, s.provider);
+    });
   };
 
   /// Return aggregated ingestion statistics for the dashboard.
-  public query func getIngestionStats() : async Types.IngestionStats {
-    let activeProviders =
-      (switch (awsCredentials)   { case null 0; case _ 1 }) +
-      (switch (azureCredentials) { case null 0; case _ 1 }) +
-      (switch (gcpCredentials)   { case null 0; case _ 1 });
+  /// Scoped to the providers the caller is assigned to.
+  public shared query ({ caller }) func getIngestionStats() : async Types.IngestionStats {
+    let states = [awsPollingState, azurePollingState, gcpPollingState].filter(func(s) {
+      isProviderAssigned(caller, s.provider);
+    });
+    var totalFindingsToday = 0;
+    var activeProviders = 0;
+    for (s in states.vals()) {
+      totalFindingsToday += s.findingsToday;
+      let hasCreds = switch (s.provider) {
+        case (#AWS)   awsCredentials.isSome();
+        case (#Azure) azureCredentials.isSome();
+        case (#GCP)   gcpCredentials.isSome();
+      };
+      if (hasCreds) { activeProviders += 1 };
+    };
     {
-      totalFindingsToday =
-        awsPollingState.findingsToday +
-        azurePollingState.findingsToday +
-        gcpPollingState.findingsToday;
+      totalFindingsToday;
       activeProviders;
-      providerStates = [awsPollingState, azurePollingState, gcpPollingState];
+      providerStates = states;
     };
   };
 
@@ -510,11 +660,13 @@ actor {
 
   /// Return paginated raw findings for a given provider.
   /// limit: max items to return (default 100, max 500). offset: starting index.
-  public query func getRawFindings(
+  /// Requires the caller to be assigned to the requested provider.
+  public shared query ({ caller }) func getRawFindings(
     provider : Types.ProviderType,
     limit    : Nat,
     offset   : Nat
   ) : async { items : [Types.RawFinding]; totalCount : Nat; hasMore : Bool } {
+    requireProviderAccess(caller, provider, "getRawFindings");
     findingsForProvider(provider, limit, offset);
   };
 
@@ -555,7 +707,8 @@ actor {
 
   /// Return the health status of each provider's credentials.
   /// Checks in-memory token cache expiry; no network call.
-  public query func getCredentialHealth() : async [Types.CredentialHealthStatus] {
+  /// Scoped to the providers the caller is assigned to.
+  public shared query ({ caller }) func getCredentialHealth() : async [Types.CredentialHealthStatus] {
     let fiveMinNs : Int = 5 * 60 * 1_000_000_000;
     let now = Time.now();
 
@@ -634,7 +787,14 @@ actor {
       };
     };
 
-    [awsHealth, azureHealth, gcpHealth];
+    [awsHealth, azureHealth, gcpHealth].filter(func(h) {
+      switch (h.provider) {
+        case "AWS"   isProviderAssigned(caller, #AWS);
+        case "Azure" isProviderAssigned(caller, #Azure);
+        case "GCP"   isProviderAssigned(caller, #GCP);
+        case _       false;
+      };
+    });
   };
 
   // ── Ingestion Control ─────────────────────────────────────────────────────
@@ -894,9 +1054,9 @@ actor {
         let extractedAssets = Assets.extractAssetsFromFinding(enrichedAlert);
         for (a in extractedAssets.vals()) {
           let (_, assetToStore) = Assets.deduplicateAsset(updatedAssets, a);
-          let existsAlready = updatedAssets.find<(Text, Types.Asset)>(func((id, _)) { id == a.id }) != null;
+          let existsAlready = updatedAssets.find(func((id, _)) { id == a.id }) != null;
           if (existsAlready) {
-            updatedAssets := updatedAssets.map<(Text, Types.Asset), (Text, Types.Asset)>(
+            updatedAssets := updatedAssets.map(
               func((id, existing)) {
                 if (id == a.id) (id, assetToStore) else (id, existing);
               }
@@ -905,7 +1065,7 @@ actor {
             updatedAssets := [(a.id, assetToStore)].concat(updatedAssets);
           };
           // Mark asset dirty for deferred risk recalculation
-          if (newDirty.find<Text>(func(aid) { Text.equal(aid, a.id) }) == null) {
+          if (newDirty.find(func(aid) { Text.equal(aid, a.id) }) == null) {
             newDirty := newDirty.concat([a.id]);
           };
         };
@@ -924,7 +1084,7 @@ actor {
         addAuditEntry("system", "AlertIngested", "New alert: " # enrichedAlert.id, enrichedAlert.customer);
       } else {
         // Update existing entry
-        updatedAlerts := updatedAlerts.map<(Text, Types.NormalizedAlert), (Text, Types.NormalizedAlert)>(
+        updatedAlerts := updatedAlerts.map(
           func((id, existing)) {
             if (id == alertToStore.id) (id, alertToStore) else (id, existing);
           }
@@ -947,7 +1107,7 @@ actor {
     let asArr = assets.toArray();
     let updated = asArr.map(
       func((id, asset)) {
-        let isDirty = dirtyAssets.find<Text>(func(aid) { Text.equal(aid, id) }) != null;
+        let isDirty = dirtyAssets.find(func(aid) { Text.equal(aid, id) }) != null;
         if (isDirty) {
           let recalced = Assets.recalcAllAssetScores([(id, asset)], alArr);
           switch (recalced.find(func((aid, _)) { Text.equal(aid, id) })) {
@@ -966,7 +1126,8 @@ actor {
   // ── Module 2 — Normalized Alerts ─────────────────────────────────────────
 
   /// Return normalized alerts matching the provided filter criteria.
-  public query func getNormalizedAlerts(
+  /// Scoped to the providers the caller is assigned to.
+  public shared query ({ caller }) func getNormalizedAlerts(
     filter : { provider : ?Types.ProviderType; severity : ?Types.Severity; status : ?Types.AlertStatus; customer : Text; limit : Nat }
   ) : async [Types.NormalizedAlert] {
     var results = normalizedAlerts.toArray();
@@ -974,7 +1135,8 @@ actor {
     switch (filter.provider) {
       case null {};
       case (?p) {
-        results := results.filter<(Text, Types.NormalizedAlert)>(func((_, a)) {
+        requireProviderAccess(caller, p, "getNormalizedAlerts");
+        results := results.filter(func((_, a)) {
           switch (a.provider, p) {
             case (#AWS, #AWS) true;
             case (#Azure, #Azure) true;
@@ -988,7 +1150,7 @@ actor {
     switch (filter.severity) {
       case null {};
       case (?s) {
-        results := results.filter<(Text, Types.NormalizedAlert)>(func((_, a)) {
+        results := results.filter(func((_, a)) {
           switch (a.severity, s) {
             case (#Low, #Low) true;
             case (#Medium, #Medium) true;
@@ -1004,7 +1166,7 @@ actor {
     switch (filter.status) {
       case null {};
       case (?st) {
-        results := results.filter<(Text, Types.NormalizedAlert)>(func((_, a)) {
+        results := results.filter(func((_, a)) {
           switch (a.status, st) {
             case (#Open, #Open) true;
             case (#InProgress, #InProgress) true;
@@ -1016,23 +1178,31 @@ actor {
     };
     // Filter by customer
     if (filter.customer != "") {
-      results := results.filter<(Text, Types.NormalizedAlert)>(func((_, a)) {
+      results := results.filter(func((_, a)) {
         Text.equal(a.customer, filter.customer);
       });
     };
+    // Scope to the providers the caller is assigned to
+    results := results.filter(func((_, a)) {
+      isProviderAssigned(caller, a.provider);
+    });
     // results are already newest-first (prepend on insert); apply limit
     let totalLen = results.size();
     let sliceEnd = if (filter.limit < totalLen) filter.limit else totalLen;
     let sliced = results.sliceToArray(0, sliceEnd);
-    sliced.map<(Text, Types.NormalizedAlert), Types.NormalizedAlert>(func((_, a)) { a });
+    sliced.map(func((_, a)) { a });
   };
 
   /// Find a single alert by its ID.
-  public query func getAlertById(id : Text) : async ?Types.NormalizedAlert {
+  /// Requires the caller to be assigned to the alert's provider.
+  public shared query ({ caller }) func getAlertById(id : Text) : async ?Types.NormalizedAlert {
     let arr = normalizedAlerts.toArray();
-    switch (arr.find<(Text, Types.NormalizedAlert)>(func((aid, _)) { Text.equal(aid, id) })) {
+    switch (arr.find(func((aid, _)) { Text.equal(aid, id) })) {
       case null null;
-      case (?(_, a)) ?a;
+      case (?(_, a)) {
+        requireProviderAccess(caller, a.provider, "getAlertById");
+        ?a;
+      };
     };
   };
 
@@ -1064,14 +1234,16 @@ actor {
   // ── Module 3 — Asset Inventory ────────────────────────────────────────────
 
   /// Return assets matching the provided filter criteria.
-  public query func getAssets(
+  /// Scoped to the providers the caller is assigned to.
+  public shared query ({ caller }) func getAssets(
     filter : { provider : ?Types.ProviderType; assetType : ?Types.AssetType; region : ?Text; minRiskScore : ?Nat; customer : Text; limit : Nat }
   ) : async [Types.Asset] {
     var results = assets.toArray();
     switch (filter.provider) {
       case null {};
       case (?p) {
-        results := results.filter<(Text, Types.Asset)>(func((_, a)) {
+        requireProviderAccess(caller, p, "getAssets");
+        results := results.filter(func((_, a)) {
           switch (a.provider, p) {
             case (#AWS, #AWS) true;
             case (#Azure, #Azure) true;
@@ -1084,7 +1256,7 @@ actor {
     switch (filter.assetType) {
       case null {};
       case (?at_) {
-        results := results.filter<(Text, Types.Asset)>(func((_, a)) {
+        results := results.filter(func((_, a)) {
           switch (a.assetType, at_) {
             case (#EC2, #EC2) true; case (#S3, #S3) true; case (#RDS, #RDS) true;
             case (#Lambda, #Lambda) true; case (#AzureVM, #AzureVM) true;
@@ -1099,7 +1271,7 @@ actor {
     switch (filter.region) {
       case null {};
       case (?r) {
-        results := results.filter<(Text, Types.Asset)>(func((_, a)) {
+        results := results.filter(func((_, a)) {
           Text.equal(a.region, r);
         });
       };
@@ -1107,16 +1279,20 @@ actor {
     switch (filter.minRiskScore) {
       case null {};
       case (?minScore) {
-        results := results.filter<(Text, Types.Asset)>(func((_, a)) {
+        results := results.filter(func((_, a)) {
           a.riskScore >= minScore;
         });
       };
     };
     if (filter.customer != "") {
-      results := results.filter<(Text, Types.Asset)>(func((_, a)) {
+      results := results.filter(func((_, a)) {
         Text.equal(a.customer, filter.customer);
       });
     };
+    // Scope to the providers the caller is assigned to
+    results := results.filter(func((_, a)) {
+      isProviderAssigned(caller, a.provider);
+    });
     // Sort by riskScore descending
     let sorted = results.sort(func((_, a), (_, b)) {
       if (a.riskScore > b.riskScore) #less
@@ -1126,36 +1302,48 @@ actor {
     let totalLen = sorted.size();
     let sliceEnd = if (filter.limit < totalLen) filter.limit else totalLen;
     let sliced = sorted.sliceToArray(0, sliceEnd);
-    sliced.map<(Text, Types.Asset), Types.Asset>(func((_, a)) { a });
+    sliced.map(func((_, a)) { a });
   };
 
   /// Find a single asset by its ID.
-  public query func getAssetById(id : Text) : async ?Types.Asset {
+  /// Requires the caller to be assigned to the asset's provider.
+  public shared query ({ caller }) func getAssetById(id : Text) : async ?Types.Asset {
     let arr = assets.toArray();
-    switch (arr.find<(Text, Types.Asset)>(func((aid, _)) { Text.equal(aid, id) })) {
+    switch (arr.find(func((aid, _)) { Text.equal(aid, id) })) {
       case null null;
-      case (?(_, a)) ?a;
+      case (?(_, a)) {
+        requireProviderAccess(caller, a.provider, "getAssetById");
+        ?a;
+      };
     };
   };
 
   /// Return all open/in-progress normalized alerts for a given asset.
-  public query func getAssetFindings(assetId : Text) : async [Types.NormalizedAlert] {
+  /// Scoped to the providers the caller is assigned to.
+  public shared query ({ caller }) func getAssetFindings(assetId : Text) : async [Types.NormalizedAlert] {
     let arr = normalizedAlerts.toArray();
     let filtered = arr.filter(func((_, a)) {
-      a.assetId == ?assetId and (a.status == #Open or a.status == #InProgress);
+      a.assetId == ?assetId and (a.status == #Open or a.status == #InProgress) and isProviderAssigned(caller, a.provider);
     });
-    filtered.map<(Text, Types.NormalizedAlert), Types.NormalizedAlert>(func((_, a)) { a });
+    filtered.map(func((_, a)) { a });
   };
 
   // ── Module 4 — Compliance ─────────────────────────────────────────────────
 
   /// Return compliance status for a framework, counting passing/failing findings per control.
-  public query func getComplianceStatus(
+  /// Scoped to the providers the caller is assigned to.
+  public shared query ({ caller }) func getComplianceStatus(
     framework : Types.ComplianceFramework,
     provider  : ?Types.ProviderType
   ) : async { controls : [Types.ComplianceControl]; score : Nat; total : Nat; passing : Nat; failing : Nat } {
+    switch (provider) {
+      case null {};
+      case (?p) { requireProviderAccess(caller, p, "getComplianceStatus") };
+    };
     let baseCtls = Compliance.getFrameworkControls(framework, provider);
-    let alertsArr = normalizedAlerts.toArray();
+    let alertsArr = normalizedAlerts.toArray().filter(func((_, a)) {
+      isProviderAssigned(caller, a.provider);
+    });
     // Enrich controls with passing/failing counts from normalized alerts
     let enriched = baseCtls.map(
       func(ctrl) {
@@ -1164,7 +1352,7 @@ actor {
         for ((_, a) in alertsArr.vals()) {
           // Only consider alerts mapped to this control
           let ctlIds = Compliance.mapAlertToControls(a, framework);
-          let matches = ctlIds.find<Text>(func(cid) { Text.equal(cid, ctrl.controlId) }) != null;
+          let matches = ctlIds.find(func(cid) { Text.equal(cid, ctrl.controlId) }) != null;
           if (matches) {
             switch (a.status) {
               case (#Resolved) { passing_ += 1 };
@@ -1200,7 +1388,7 @@ actor {
         case _ false;
       };
     });
-    filtered.sort<Types.ComplianceTrendEntry>(func(a, b) {
+    filtered.sort(func(a, b) {
       if (a.weekTimestamp < b.weekTimestamp) #less
       else if (a.weekTimestamp > b.weekTimestamp) #greater
       else #equal;
@@ -1217,7 +1405,7 @@ actor {
         var failing_ = 0;
         for ((_, a) in alertsArr.vals()) {
           let ctlIds = Compliance.mapAlertToControls(a, framework);
-          let matches = ctlIds.find<Text>(func(cid) { Text.equal(cid, ctrl.controlId) }) != null;
+          let matches = ctlIds.find(func(cid) { Text.equal(cid, ctrl.controlId) }) != null;
           if (matches) {
             switch (a.status) {
               case (#Resolved) { passing_ += 1 };
@@ -1232,7 +1420,7 @@ actor {
         { ctrl with status; passingFindings = passing_; failingFindings = failing_ };
       }
     );
-    enriched.filter<Types.ComplianceControl>(func(c) {
+    enriched.filter(func(c) {
       c.status == #Failing or c.status == #NoCoverage;
     });
   };
@@ -1257,7 +1445,7 @@ actor {
     let filtered = arr.filter(func((_, r)) {
       customer == "" or Text.equal(r.customer, customer);
     });
-    filtered.map<(Text, Types.AlertRule), Types.AlertRule>(func((_, r)) { r });
+    filtered.map(func((_, r)) { r });
   };
 
   /// Insert or update an alert rule.
@@ -1267,7 +1455,7 @@ actor {
     if (rule.id.size() > 512) { Runtime.trap("rule.id exceeds max length") };
     if (rule.name.size() > 512) { Runtime.trap("rule.name exceeds max length") };
     let arr = alertRules.toArray();
-    let exists = arr.find<(Text, Types.AlertRule)>(func((id, _)) { Text.equal(id, rule.id) }) != null;
+    let exists = arr.find(func((id, _)) { Text.equal(id, rule.id) }) != null;
     if (exists) {
       let updated = arr.map(
         func((id, r)) { if (Text.equal(id, rule.id)) (id, rule) else (id, r) }
@@ -1302,7 +1490,7 @@ actor {
   ) : async [Types.NotificationLog] {
     var arr = notificationLogs.toArray();
     if (filter.customer != "") {
-      arr := arr.filter<(Text, Types.NotificationLog)>(func((_, l)) {
+      arr := arr.filter(func((_, l)) {
         Text.equal(l.customer, filter.customer);
       });
     };
@@ -1310,7 +1498,7 @@ actor {
     let totalLen = arr.size();
     let sliceEnd = if (filter.limit < totalLen) filter.limit else totalLen;
     let sliced = arr.sliceToArray(0, sliceEnd);
-    sliced.map<(Text, Types.NotificationLog), Types.NotificationLog>(func((_, l)) { l });
+    sliced.map(func((_, l)) { l });
   };
 
   /// Acknowledge a notification log entry.
@@ -1341,13 +1529,20 @@ actor {
   // ── Cross-module queries ───────────────────────────────────────────────────
 
   /// Return recent timeline events for a customer, sorted by timestamp descending.
-  public query func getTimeline(customer : Text, limit : Nat) : async [Types.TimelineEvent] {
+  /// Scoped to the providers the caller is assigned to.
+  public shared query ({ caller }) func getTimeline(customer : Text, limit : Nat) : async [Types.TimelineEvent] {
     var arr = timelineEvents.toArray();
     if (customer != "") {
-      arr := arr.filter<Types.TimelineEvent>(func(e) {
+      arr := arr.filter(func(e) {
         Text.equal(e.customer, customer);
       });
     };
+    arr := arr.filter(func(e) {
+      switch (e.provider) {
+        case null true;
+        case (?p) isProviderAssigned(caller, p);
+      };
+    });
     // Already newest-first
     let totalLen = arr.size();
     let sliceEnd = if (limit < totalLen) limit else totalLen;
@@ -1356,7 +1551,8 @@ actor {
 
   /// Search across alerts, assets, and audit log.
   /// maxResults: cap total results (default 100, max 500). hasMore indicates truncation.
-  public query func globalSearch(
+  /// Scoped to the providers the caller is assigned to.
+  public shared query ({ caller }) func globalSearch(
     query_     : Text,
     customer   : Text,
     maxResults : Nat
@@ -1371,9 +1567,11 @@ actor {
       if (results.size() >= limit) { hasMore := true; break alertSearch };
       if (customer == "" or Text.equal(a.customer, customer)) {
         if (
-          a.title.contains(#text query_) or
-          a.id.contains(#text query_) or
-          a.description.contains(#text query_)
+          isProviderAssigned(caller, a.provider) and (
+            a.title.contains(#text query_) or
+            a.id.contains(#text query_) or
+            a.description.contains(#text query_)
+          )
         ) {
           results.add({
             id           = a.id;
@@ -1394,8 +1592,10 @@ actor {
         if (results.size() >= limit) { hasMore := true; break assetSearch };
         if (customer == "" or Text.equal(a.customer, customer)) {
           if (
-            a.name.contains(#text query_) or
-            a.id.contains(#text query_)
+            isProviderAssigned(caller, a.provider) and (
+              a.name.contains(#text query_) or
+              a.id.contains(#text query_)
+            )
           ) {
             let providerText = switch (a.provider) { case (#AWS) "AWS"; case (#Azure) "Azure"; case (#GCP) "GCP" };
             results.add({
@@ -1441,8 +1641,11 @@ actor {
   // ── Phase 3 — Correlation Engine query/update functions ─────────────────
 
   /// Return the most recent `limit` correlated incidents sorted by detectedAt descending.
-  public query func getCorrelatedIncidents(limit : Nat) : async [(Text, Types.CorrelatedIncident)] {
-    let arr = correlatedIncidents;
+  /// Scoped to incidents touching providers the caller is assigned to.
+  public shared query ({ caller }) func getCorrelatedIncidents(limit : Nat) : async [(Text, Types.CorrelatedIncident)] {
+    let arr = correlatedIncidents.filter(func((_, inc)) {
+      inc.sourceProviders.any(func(p) { isProviderAssigned(caller, p) });
+    });
     // Sort descending by detectedAt
     let sorted = arr.sort(
       func((_, a), (_, b)) { Int.compare(b.detectedAt, a.detectedAt) }
@@ -1453,9 +1656,16 @@ actor {
   };
 
   /// Return a correlated incident by its incidentId, or null if not found.
-  public query func getCorrelatedIncidentById(id : Text) : async ?Types.CorrelatedIncident {
-    switch (correlatedIncidents.find<(Text, Types.CorrelatedIncident)>(func((key, _)) { Text.equal(key, id) })) {
-      case (?(_, inc)) ?inc;
+  /// Requires the caller to be assigned to one of the incident's source providers.
+  public shared query ({ caller }) func getCorrelatedIncidentById(id : Text) : async ?Types.CorrelatedIncident {
+    switch (correlatedIncidents.find(func((key, _)) { Text.equal(key, id) })) {
+      case (?(_, inc)) {
+        if (inc.sourceProviders.any(func(p) { isProviderAssigned(caller, p) })) {
+          ?inc;
+        } else {
+          Runtime.trap("Not authorized for provider");
+        };
+      };
       case null null;
     };
   };
@@ -1470,7 +1680,7 @@ actor {
     requireAuth(caller, "updateCorrelatedIncidentStatus");
     if (id.size() > 512) { Runtime.trap("id exceeds max length") };
     var found = false;
-    correlatedIncidents := correlatedIncidents.map<(Text, Types.CorrelatedIncident), (Text, Types.CorrelatedIncident)>(
+    correlatedIncidents := correlatedIncidents.map(
       func((key, inc)) {
         if (Text.equal(key, id)) {
           found := true;
@@ -1487,8 +1697,12 @@ actor {
   };
 
   /// Return aggregated correlation statistics for the dashboard panel.
-  public query func getCorrelationStats() : async Types.CorrelationStats {
-    CorrelationEngine.computeStats(correlatedIncidents, Time.now());
+  /// Scoped to incidents touching providers the caller is assigned to.
+  public shared query ({ caller }) func getCorrelationStats() : async Types.CorrelationStats {
+    let scoped = correlatedIncidents.filter(func((_, inc)) {
+      inc.sourceProviders.any(func(p) { isProviderAssigned(caller, p) });
+    });
+    CorrelationEngine.computeStats(scoped, Time.now());
   };
 
   /// Seed 4 mock normalized alerts (idempotent) and run the correlation engine.
@@ -1620,18 +1834,19 @@ actor {
       func((_, inc)) { inc.detectedAt >= nowNs }
     );
     ignore beforeCount;
-    newOnes.map<(Text, Types.CorrelatedIncident), Types.CorrelatedIncident>(func((_, inc)) { inc });
+    newOnes.map(func((_, inc)) { inc });
   };
 
   /// Return normalized alerts whose id matches any entry in alertIds.
-  public query func getAlertsForCorrelation(alertIds : [Text]) : async [Types.NormalizedAlert] {
+  /// Scoped to the providers the caller is assigned to.
+  public shared query ({ caller }) func getAlertsForCorrelation(alertIds : [Text]) : async [Types.NormalizedAlert] {
     let allAlerts = normalizedAlerts.toArray();
     let results = allAlerts.filter(
-      func((id, _)) {
-        alertIds.find<Text>(func(target) { Text.equal(id, target) }) != null;
+      func((id, a)) {
+        alertIds.find(func(target) { Text.equal(id, target) }) != null and isProviderAssigned(caller, a.provider);
       }
     );
-    results.map<(Text, Types.NormalizedAlert), Types.NormalizedAlert>(func((_, a)) { a });
+    results.map(func((_, a)) { a });
   };
 
   // ── Phase 2 — Webhook / Pipeline query functions ─────────────────────────
@@ -1643,9 +1858,14 @@ actor {
 
   /// Return failed ingestion records, optionally filtered by provider.
   /// provider field is returned as Text to avoid Candid variant decoding issues on the frontend.
-  public query func getFailedIngestions(provider : ?Types.ProviderType, limit : Nat) : async [{ id : Text; provider : Text; errorType : Text; rawPayload : Text; timestamp : Int; errorMessage : Text; status : Text }] {
+  /// Scoped to the providers the caller is assigned to.
+  public shared query ({ caller }) func getFailedIngestions(provider : ?Types.ProviderType, limit : Nat) : async [{ id : Text; provider : Text; errorType : Text; rawPayload : Text; timestamp : Int; errorMessage : Text; status : Text }] {
+    switch (provider) {
+      case null {};
+      case (?p) { requireProviderAccess(caller, p, "getFailedIngestions") };
+    };
     let raw = FailedIngestionStore.getFailedIngestions(failedIngestions, provider, limit);
-    raw.map<Types.FailedIngestion, { id : Text; provider : Text; errorType : Text; rawPayload : Text; timestamp : Int; errorMessage : Text; status : Text }>(
+    raw.filter(func(r) { isProviderAssigned(caller, r.provider) }).map(
       func(r) {{
         id           = r.id;
         provider     = providerToText(r.provider);
@@ -1660,9 +1880,10 @@ actor {
 
   /// Return per-provider pipeline health stats for the dashboard.
   /// provider field is returned as Text to avoid Candid variant decoding issues on the frontend.
-  public query func getPipelineHealth() : async [{ provider : Text; webhookEventsToday : Nat; pollEventsToday : Nat; normalizationSuccessRate : Float; failedIngestionCount : Nat; avgLatencyMs : Float }] {
+  /// Scoped to the providers the caller is assigned to.
+  public shared query ({ caller }) func getPipelineHealth() : async [{ provider : Text; webhookEventsToday : Nat; pollEventsToday : Nat; normalizationSuccessRate : Float; failedIngestionCount : Nat; avgLatencyMs : Float }] {
     let raw = PipelineMetrics.getPipelineHealth(pipelineEvents, failedIngestions, Time.now());
-    raw.map<Types.PipelineHealthStats, { provider : Text; webhookEventsToday : Nat; pollEventsToday : Nat; normalizationSuccessRate : Float; failedIngestionCount : Nat; avgLatencyMs : Float }>(
+    raw.filter(func(s) { isProviderAssigned(caller, s.provider) }).map(
       func(s) {{
         provider                 = providerToText(s.provider);
         webhookEventsToday       = s.webhookEventsToday;
@@ -1675,8 +1896,10 @@ actor {
   };
 
   /// Return aggregated webhook statistics for the dashboard.
-  public query func getWebhookStats() : async { webhookEventsToday : Nat; webhookNormalizationRate : Float } {
-    let stats = PipelineMetrics.getPipelineHealth(pipelineEvents, failedIngestions, Time.now());
+  /// Scoped to the providers the caller is assigned to.
+  public shared query ({ caller }) func getWebhookStats() : async { webhookEventsToday : Nat; webhookNormalizationRate : Float } {
+    let stats = PipelineMetrics.getPipelineHealth(pipelineEvents, failedIngestions, Time.now())
+      .filter(func(s) { isProviderAssigned(caller, s.provider) });
     var totalWebhook = 0;
     var totalNormOk  = 0.0;
     var totalNorm    = 0.0;
@@ -1697,7 +1920,7 @@ actor {
   public query func getAuditLog(customer : Text, limit : Nat) : async [Types.AuditLogEntry] {
     var arr = auditLog.toArray();
     if (customer != "") {
-      arr := arr.filter<Types.AuditLogEntry>(func(e) {
+      arr := arr.filter(func(e) {
         Text.equal(e.customer, customer);
       });
     };
@@ -1742,6 +1965,10 @@ actor {
     req : { ip : Text; providers : [Types.ProviderType]; dryRun : Bool; customer : Text }
   ) : async Types.PlaybookResult {
     requireAuth(caller, "blockIp");
+    // Require access to every provider the caller is acting on
+    for (prov in req.providers.vals()) {
+      requireProviderAccess(caller, prov, "blockIp");
+    };
     if (req.ip.size() > 64 or req.ip.size() == 0) {
       return { success = false; message = "Invalid IP address"; dryRunPreview = null; rawApiError = null; provider = null };
     };
@@ -1863,6 +2090,7 @@ actor {
     req : { resourceId : Text; provider : Types.ProviderType; dryRun : Bool; customer : Text }
   ) : async Types.PlaybookResult {
     requireAuth(caller, "isolateResource");
+    requireProviderAccess(caller, req.provider, "isolateResource");
     if (req.resourceId.size() > 512 or req.resourceId.size() == 0) {
       return { success = false; message = "Invalid resourceId"; dryRunPreview = null; rawApiError = null; provider = ?req.provider };
     };
@@ -1959,6 +2187,7 @@ actor {
     req : { userId : Text; provider : Types.ProviderType; accessKeyId : ?Text; dryRun : Bool; customer : Text }
   ) : async Types.PlaybookResult {
     requireAuth(caller, "revokeIamCredentials");
+    requireProviderAccess(caller, req.provider, "revokeIamCredentials");
     if (req.userId.size() > 512 or req.userId.size() == 0) {
       return { success = false; message = "Invalid userId"; dryRunPreview = null; rawApiError = null; provider = ?req.provider };
     };
@@ -2056,6 +2285,7 @@ actor {
     req : { userPrincipalName : Text; dryRun : Bool; customer : Text }
   ) : async Types.PlaybookResult {
     requireAuth(caller, "disableAzureAdAccount");
+    requireProviderAccess(caller, #Azure, "disableAzureAdAccount");
     if (req.userPrincipalName.size() > 512 or req.userPrincipalName.size() == 0) {
       return { success = false; message = "Invalid userPrincipalName"; dryRunPreview = null; rawApiError = null; provider = ?#Azure };
     };
@@ -2094,6 +2324,7 @@ actor {
     req : { projectId : Text; dryRun : Bool; customer : Text }
   ) : async Types.PlaybookResult {
     requireAuth(caller, "forceGcpIamReview");
+    requireProviderAccess(caller, #GCP, "forceGcpIamReview");
     if (req.projectId.size() > 512 or req.projectId.size() == 0) {
       return { success = false; message = "Invalid projectId"; dryRunPreview = null; rawApiError = null; provider = ?#GCP };
     };
@@ -2129,7 +2360,7 @@ actor {
           );
           switch (openIncident) {
             case (?(incId, inc)) {
-              correlatedIncidents := correlatedIncidents.map<(Text, Types.CorrelatedIncident), (Text, Types.CorrelatedIncident)>(
+              correlatedIncidents := correlatedIncidents.map(
                 func((id, i)) {
                   if (Text.equal(id, incId)) {
                     let existingNotes = i.notes.get("");
@@ -2175,6 +2406,7 @@ actor {
         { success = false; message = "Alert not found: " # req.alertId; dryRunPreview = null; rawApiError = null; provider = null };
       };
       case (?(_, alert)) {
+        requireProviderAccess(caller, alert.provider, "escalateToIncident");
         let nowNs = Time.now();
         let incidentId = "escalated-" # req.alertId # "-" # nowNs.toText();
         let severityVariant : Types.Severity = switch (req.severity.toLower()) {
@@ -2238,7 +2470,7 @@ actor {
     requireAuth(caller, "enrichAlertPublic");
     if (alertId.size() > 512) { return #err("alertId too long") };
     let arr = normalizedAlerts.toArray();
-    switch (arr.find<(Text, Types.NormalizedAlert)>(func((id, _)) { Text.equal(id, alertId) })) {
+    switch (arr.find(func((id, _)) { Text.equal(id, alertId) })) {
       case null { #err("Alert not found: " # alertId) };
       case (?(_, alert)) {
         if (alert.customer != customer and customer != "") {
@@ -2279,6 +2511,31 @@ actor {
     };
   };
 
+  // ── Webhook signature secrets ─────────────────────────────────────────────
+
+  /// Save the webhook signature secret for a provider.
+  /// The secret value is stored write-only and is never returned to the frontend.
+  public shared ({ caller }) func saveWebhookSecret(provider : Types.ProviderType, secret : Text) : async () {
+    requireAuth(caller, "saveWebhookSecret");
+    switch (provider) {
+      case (#AWS)   { webhookSecrets := { webhookSecrets with aws = ?secret } };
+      case (#Azure) { webhookSecrets := { webhookSecrets with azure = ?secret } };
+      case (#GCP)   { webhookSecrets := { webhookSecrets with gcp = ?secret } };
+    };
+    addAuditEntry(caller.toText(), "WebhookSecretSaved", "Webhook secret updated for provider", "");
+  };
+
+  /// Return which providers have a webhook secret configured (booleans only —
+  /// never the secret values).
+  public shared ({ caller }) func getWebhookSecretStatus() : async { awsSet : Bool; azureSet : Bool; gcpSet : Bool } {
+    requireAuth(caller, "getWebhookSecretStatus");
+    {
+      awsSet   = webhookSecrets.aws.isSome();
+      azureSet = webhookSecrets.azure.isSome();
+      gcpSet   = webhookSecrets.gcp.isSome();
+    };
+  };
+
   // ── Phase 7 — Report Functions ────────────────────────────────────────────
 
   /// Generate a report as CSV and store it.
@@ -2295,7 +2552,7 @@ actor {
         var rows : [Text] = ["alertId,severity,provider,title,resource,region,timestamp,status,owner,mitreTag"];
         for ((_, a) in alerts.vals()) {
           if ((req.customer == "" or Text.equal(a.customer, req.customer)) and
-              (req.providerScope.size() == 0 or req.providerScope.find<Text>(func(p) {
+              (req.providerScope.size() == 0 or req.providerScope.find(func(p) {
                 let pText = switch (a.provider) { case (#AWS) "AWS"; case (#Azure) "Azure"; case (#GCP) "GCP" };
                 Text.equal(p, pText) or Text.equal(p, "All");
               }) != null)) {
@@ -2401,7 +2658,7 @@ actor {
   public shared ({ caller }) func deleteReport(reportId : Text, customer : Text) : async () {
     requireAuth(caller, "deleteReport");
     if (reportId.size() > 512) { Runtime.trap("reportId too long") };
-    generatedReports := generatedReports.filter<Types.GeneratedReport>(func(r) {
+    generatedReports := generatedReports.filter(func(r) {
       not Text.equal(r.reportId, reportId);
     });
     addAuditEntry(caller.toText(), "ReportDeleted", "Report " # reportId # " deleted", customer);
@@ -2425,7 +2682,7 @@ actor {
         reportEmailConfigs := reportEmailConfigs.concat([newEntry]);
       };
       case (?_) {
-        reportEmailConfigs := reportEmailConfigs.map<Types.ReportEmailConfig, Types.ReportEmailConfig>(func(c) {
+        reportEmailConfigs := reportEmailConfigs.map(func(c) {
           if (Text.equal(c.reportType, config.reportType) and Text.equal(c.customer, config.customer)) newEntry else c;
         });
       };
@@ -2442,10 +2699,220 @@ actor {
     let filtered = reportEmailConfigs.filter(func(c) {
       customer == "" or Text.equal(c.customer, customer);
     });
-    filtered.map<Types.ReportEmailConfig, { reportType : Text; recipients : [Text] }>(func(c) {
+    filtered.map(func(c) {
       { reportType = c.reportType; recipients = c.recipients };
     });
   };
+
+  // ── OQL data exposure ─────────────────────────────────────────────────────
+  // Persisted, non-secret data is exposed through the OQL query surface
+  // (schema() / execute()). Every entity is controllerOnly: only the platform
+  // controller (Data Intelligence agent) reads it. Secret values (webhook
+  // secrets, enrichment API keys, cloud credentials) and sensitive payload
+  // fields are deliberately NOT exposed here.
+
+  include Expose({
+    entities = [
+      rawFindings.toEntityManual("rawFinding", "RawFinding", "id")
+        .sample({ id = ""; provider = #AWS; findingId = ""; timestamp = 0; severity = #Low; title = ""; description = ""; region = null; accountId = null; rawMetadata = "" })
+        .payload("id", func r = r.id)
+        .payload("provider", func r = switch (r.provider) { case (#AWS) "AWS"; case (#Azure) "Azure"; case (#GCP) "GCP"; })
+        .payload("findingId", func r = r.findingId)
+        .payload("timestamp", func r = r.timestamp)
+        .payload("severity", func r = switch (r.severity) { case (#Low) "Low"; case (#Medium) "Medium"; case (#High) "High"; case (#Critical) "Critical"; case (#Unknown) "Unknown"; })
+        .payload("title", func r = r.title)
+        .payload("description", func r = r.description)
+        .payload("region", func r = r.region.get(""))
+        .payload("accountId", func r = r.accountId.get(""))
+        .controllerOnly()
+        .build(),
+
+      normalizedAlerts.toEntityManual("normalizedAlert", "NormalizedAlert", "id")
+        .sample(("", { id = ""; provider = #AWS; findingId = ""; originalSeverity = ""; severity = #Low; title = ""; description = ""; assetId = null; assetType = null; accountId = null; region = null; timestamp = 0; status = #Open; owner = null; customer = ""; mitre = null; rawFindingId = ""; recurrenceCount = 0; ingestionSource = null; enrichment = null }))
+        .payload("id", func ((_, a)) = a.id)
+        .payload("provider", func ((_, a)) = switch (a.provider) { case (#AWS) "AWS"; case (#Azure) "Azure"; case (#GCP) "GCP"; })
+        .payload("severity", func ((_, a)) = switch (a.severity) { case (#Low) "Low"; case (#Medium) "Medium"; case (#High) "High"; case (#Critical) "Critical"; case (#Unknown) "Unknown"; })
+        .payload("title", func ((_, a)) = a.title)
+        .payload("description", func ((_, a)) = a.description)
+        .payload("status", func ((_, a)) = switch (a.status) { case (#Open) "Open"; case (#InProgress) "InProgress"; case (#Resolved) "Resolved"; })
+        .payload("customer", func ((_, a)) = a.customer)
+        .payload("timestamp", func ((_, a)) = a.timestamp)
+        .payload("assetId", func ((_, a)) = a.assetId.get(""))
+        .payload("region", func ((_, a)) = a.region.get(""))
+        .payload("accountId", func ((_, a)) = a.accountId.get(""))
+        .controllerOnly()
+        .build(),
+
+      assets.toEntityManual("asset", "Asset", "id")
+        .sample(("", { id = ""; name = ""; assetType = #EC2; provider = #AWS; accountId = ""; region = ""; tags = []; riskScore = 0; openFindings = 0; lastSeen = 0; customer = "" }))
+        .payload("id", func ((_, a)) = a.id)
+        .payload("name", func ((_, a)) = a.name)
+        .payload("assetType", func ((_, a)) = switch (a.assetType) { case (#EC2) "EC2"; case (#S3) "S3"; case (#RDS) "RDS"; case (#Lambda) "Lambda"; case (#AzureVM) "AzureVM"; case (#AzureStorage) "AzureStorage"; case (#AzureDatabase) "AzureDatabase"; case (#GCPCompute) "GCPCompute"; case (#GCPStorage) "GCPStorage"; case (#GCPCloudSQL) "GCPCloudSQL"; case (#Other) "Other"; })
+        .payload("provider", func ((_, a)) = switch (a.provider) { case (#AWS) "AWS"; case (#Azure) "Azure"; case (#GCP) "GCP"; })
+        .payload("accountId", func ((_, a)) = a.accountId)
+        .payload("region", func ((_, a)) = a.region)
+        .payload("riskScore", func ((_, a)) = a.riskScore)
+        .payload("openFindings", func ((_, a)) = a.openFindings)
+        .payload("lastSeen", func ((_, a)) = a.lastSeen)
+        .payload("customer", func ((_, a)) = a.customer)
+        .controllerOnly()
+        .build(),
+
+      complianceControls.toEntityManual("complianceControl", "ComplianceControl", "controlId")
+        .sample(("", { controlId = ""; framework = #NISTCSF; title = ""; description = ""; remediationGuidance = ""; status = #NoCoverage; passingFindings = 0; failingFindings = 0; provider = null }))
+        .payload("controlId", func ((_, c)) = c.controlId)
+        .payload("framework", func ((_, c)) = switch (c.framework) { case (#NISTCSF) "NISTCSF"; case (#CISAws) "CISAws"; case (#CISAzure) "CISAzure"; case (#CISGCP) "CISGCP"; case (#ISO27001) "ISO27001"; case (#SOC2) "SOC2"; })
+        .payload("title", func ((_, c)) = c.title)
+        .payload("status", func ((_, c)) = switch (c.status) { case (#Passing) "Passing"; case (#Failing) "Failing"; case (#NoCoverage) "NoCoverage"; })
+        .payload("passingFindings", func ((_, c)) = c.passingFindings)
+        .payload("failingFindings", func ((_, c)) = c.failingFindings)
+        .controllerOnly()
+        .build(),
+
+      complianceTrend.toEntityManual("complianceTrend", "ComplianceTrendEntry", "weekTimestamp")
+        .sample({ framework = #NISTCSF; weekTimestamp = 0; score = 0; totalControls = 0; passingControls = 0 })
+        .payload("framework", func e = switch (e.framework) { case (#NISTCSF) "NISTCSF"; case (#CISAws) "CISAws"; case (#CISAzure) "CISAzure"; case (#CISGCP) "CISGCP"; case (#ISO27001) "ISO27001"; case (#SOC2) "SOC2"; })
+        .payload("weekTimestamp", func e = e.weekTimestamp)
+        .payload("score", func e = e.score)
+        .payload("totalControls", func e = e.totalControls)
+        .payload("passingControls", func e = e.passingControls)
+        .controllerOnly()
+        .build(),
+
+      alertRules.toEntityManual("alertRule", "AlertRule", "id")
+        .sample(("", { id = ""; name = ""; enabled = false; severityThreshold = null; findingType = null; assetId = null; provider = null; region = null; channels = []; cooldownMinutes = 0; escalationMinutes = null; escalationRecipient = null; customer = "" }))
+        .payload("id", func ((_, r)) = r.id)
+        .payload("name", func ((_, r)) = r.name)
+        .payload("enabled", func ((_, r)) = r.enabled)
+        .payload("customer", func ((_, r)) = r.customer)
+        .controllerOnly()
+        .build(),
+
+      notificationLogs.toEntityManual("notificationLog", "NotificationLog", "id")
+        .sample(("", { id = ""; alertId = ""; ruleId = ""; channel = #InApp; recipient = ""; timestamp = 0; status = #Sent; acknowledged = false; acknowledgedAt = null; customer = "" }))
+        .payload("id", func ((_, l)) = l.id)
+        .payload("alertId", func ((_, l)) = l.alertId)
+        .payload("ruleId", func ((_, l)) = l.ruleId)
+        .payload("channel", func ((_, l)) = switch (l.channel) { case (#InApp) "InApp"; case (#Email) "Email"; case (#TeamsWebhook) "TeamsWebhook"; })
+        .payload("timestamp", func ((_, l)) = l.timestamp)
+        .payload("status", func ((_, l)) = switch (l.status) { case (#Sent) "Sent"; case (#Failed) "Failed"; case (#Acknowledged) "Acknowledged"; })
+        .payload("acknowledged", func ((_, l)) = l.acknowledged)
+        .payload("customer", func ((_, l)) = l.customer)
+        .controllerOnly()
+        .build(),
+
+      timelineEvents.toEntityManual("timelineEvent", "TimelineEvent", "id")
+        .sample({ id = ""; timestamp = 0; eventType = ""; title = ""; description = ""; provider = null; severity = null; customer = "" })
+        .payload("id", func e = e.id)
+        .payload("timestamp", func e = e.timestamp)
+        .payload("eventType", func e = e.eventType)
+        .payload("title", func e = e.title)
+        .payload("description", func e = e.description)
+        .payload("customer", func e = e.customer)
+        .controllerOnly()
+        .build(),
+
+      auditLog.toEntityManual("auditLog", "AuditLogEntry", "id")
+        .sample({ id = ""; timestamp = 0; actorId = ""; action = ""; details = ""; customer = "" })
+        .payload("id", func e = e.id)
+        .payload("timestamp", func e = e.timestamp)
+        .payload("actorId", func e = e.actorId)
+        .payload("action", func e = e.action)
+        .payload("details", func e = e.details)
+        .payload("customer", func e = e.customer)
+        .controllerOnly()
+        .build(),
+
+      failedIngestions.toEntityManual("failedIngestion", "FailedIngestion", "id")
+        .sample({ id = ""; provider = #AWS; errorType = ""; rawPayload = ""; timestamp = 0; errorMessage = ""; status = "" })
+        .payload("id", func r = r.id)
+        .payload("provider", func r = switch (r.provider) { case (#AWS) "AWS"; case (#Azure) "Azure"; case (#GCP) "GCP"; })
+        .payload("errorType", func r = r.errorType)
+        .payload("timestamp", func r = r.timestamp)
+        .payload("errorMessage", func r = r.errorMessage)
+        .payload("status", func r = r.status)
+        .controllerOnly()
+        .build(),
+
+      pipelineEvents.toEntityManual("pipelineEvent", "IngestionEvent", "timestamp")
+        .sample({ provider = #AWS; source = #Poll; normalizedOk = false; latencyMs = 0.0; timestamp = 0 })
+        .payload("provider", func e = switch (e.provider) { case (#AWS) "AWS"; case (#Azure) "Azure"; case (#GCP) "GCP"; })
+        .payload("source", func e = switch (e.source) { case (#Poll) "Poll"; case (#Webhook) "Webhook"; })
+        .payload("normalizedOk", func e = e.normalizedOk)
+        .payload("latencyMs", func e = e.latencyMs)
+        .payload("timestamp", func e = e.timestamp)
+        .controllerOnly()
+        .build(),
+
+      correlatedIncidents.toEntityManual<(Text, Types.CorrelatedIncident)>("correlatedIncident", "CorrelatedIncident", "incidentId")
+        .sample(("", { incidentId = ""; incidentType = ""; severity = #Critical; status = #Open; sourceAlerts = []; sourceProviders = []; sourceIp = null; affectedResources = []; timeDeltaMinutes = 0.0; correlationWindowMinutes = 0; detectedAt = 0; assignedOwner = null; notes = null; customer = "" }))
+        .payload("incidentId", func ((_, i)) = i.incidentId)
+        .payload("incidentType", func ((_, i)) = i.incidentType)
+        .payload("severity", func ((_, i)) = switch (i.severity) { case (#Low) "Low"; case (#Medium) "Medium"; case (#High) "High"; case (#Critical) "Critical"; case (#Unknown) "Unknown"; })
+        .payload("status", func ((_, i)) = switch (i.status) { case (#Open) "Open"; case (#Investigating) "Investigating"; case (#Resolved) "Resolved"; })
+        .payload("detectedAt", func ((_, i)) = i.detectedAt)
+        .payload("sourceIp", func ((_, i)) = i.sourceIp.get(""))
+        .payload("assignedOwner", func ((_, i)) = i.assignedOwner.get(""))
+        .payload("customer", func ((_, i)) = i.customer)
+        .controllerOnly()
+        .build(),
+
+      generatedReports.toEntityManual<Types.GeneratedReport>("generatedReport", "GeneratedReport", "reportId")
+        .sample({ reportId = ""; reportType = ""; dateRangeStart = ""; dateRangeEnd = ""; providerScope = []; format = ""; generatedAt = ""; generatedBy = ""; customer = ""; csvData = null })
+        .payload("reportId", func r = r.reportId)
+        .payload("reportType", func r = r.reportType)
+        .payload("format", func r = r.format)
+        .payload("generatedAt", func r = r.generatedAt)
+        .payload("generatedBy", func r = r.generatedBy)
+        .payload("customer", func r = r.customer)
+        .controllerOnly()
+        .build(),
+
+      reportEmailConfigs.toEntityManual<Types.ReportEmailConfig>("reportEmailConfig", "ReportEmailConfig", "reportType")
+        .sample({ reportType = ""; recipients = []; customer = "" })
+        .payload("reportType", func c = c.reportType)
+        .payload("customer", func c = c.customer)
+        .controllerOnly()
+        .build(),
+
+      [awsPollingState, azurePollingState, gcpPollingState].toEntityManual<Types.ProviderPollingState>("providerPollingState", "ProviderPollingState", "provider")
+        .sample({ provider = #AWS; status = #Active; lastSuccessfulPoll = null; lastPollAttempt = null; findingsToday = 0; consecutiveFailures = 0; lastError = null; interval = #FiveMin })
+        .payload("provider", func s = switch (s.provider) { case (#AWS) "AWS"; case (#Azure) "Azure"; case (#GCP) "GCP"; })
+        .payload("status", func s = switch (s.status) { case (#Active) "Active"; case (#Inactive) "Inactive"; case (#Error) "Error"; case (#AuthPaused) "AuthPaused"; })
+        .payload("lastSuccessfulPoll", func s = s.lastSuccessfulPoll.get(0))
+        .payload("lastPollAttempt", func s = s.lastPollAttempt.get(0))
+        .payload("findingsToday", func s = s.findingsToday)
+        .payload("consecutiveFailures", func s = s.consecutiveFailures)
+        .payload("lastError", func s = s.lastError.get(""))
+        .payload("interval", func s = switch (s.interval) { case (#FiveMin) "FiveMin"; case (#FifteenMin) "FifteenMin"; case (#ThirtyMin) "ThirtyMin"; case (#OneHour) "OneHour"; })
+        .controllerOnly()
+        .build(),
+
+      Entity.manual(
+        "providerAssignment",
+        func () : Iter.Iter<(Text, Text)> {
+          let rows = List.empty<(Text, Text)>();
+          for ((p, providers) in providerAssignments.entries()) {
+            for (pr in providers.values()) {
+              rows.add((p.toText(), switch (pr) { case (#AWS) "AWS"; case (#Azure) "Azure"; case (#GCP) "GCP"; }));
+            };
+          };
+          rows.values()
+        },
+        "ProviderAssignment",
+        "principal"
+      )
+        .sample(("", "AWS"))
+        .payload("principal", func ((p, _)) = p)
+        .payload("provider", func ((_, pr)) = pr)
+        .controllerOnly()
+        .build(),
+    ];
+  });
+
+  include PerProviderAccessControlApi(providerAssignments, requireAuth);
+
+  include ApiDocMixin();
 
 };
 

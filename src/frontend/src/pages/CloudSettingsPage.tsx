@@ -23,11 +23,13 @@ import { StatusBadge } from "../components/StatusBadge";
 import {
   useCredentialHealth,
   useGetEnrichmentKeys,
+  useGetWebhookSecretStatus,
   useProviderStates,
   useSaveAwsCredentials,
   useSaveAzureCredentials,
   useSaveEnrichmentKeys,
   useSaveGcpCredentials,
+  useSaveWebhookSecret,
   useSetPollingInterval,
   useTestConnection,
 } from "../hooks/use-backend";
@@ -984,6 +986,121 @@ function ThreatIntelSection() {
   );
 }
 
+// ── Webhook Signature Secrets Section ────────────────────────────────────
+
+const WEBHOOK_PROVIDERS: { provider: ProviderType; label: string }[] = [
+  { provider: "AWS", label: "AWS" },
+  { provider: "Azure", label: "Azure" },
+  { provider: "GCP", label: "GCP" },
+];
+
+function WebhookSecretSection() {
+  const { data: status, isLoading: statusLoading } =
+    useGetWebhookSecretStatus();
+  const saveSecret = useSaveWebhookSecret();
+  const [secrets, setSecrets] = useState<Record<ProviderType, string>>({
+    AWS: "",
+    Azure: "",
+    GCP: "",
+  });
+
+  const isConfigured = (p: ProviderType) =>
+    p === "AWS"
+      ? status?.awsSet
+      : p === "Azure"
+        ? status?.azureSet
+        : status?.gcpSet;
+
+  const handleSave = async (provider: ProviderType) => {
+    const secret = secrets[provider].trim();
+    if (!secret) return;
+    try {
+      await saveSecret.mutateAsync({ provider, secret });
+      toast.success(`${provider} webhook secret saved`);
+      setSecrets((prev) => ({ ...prev, [provider]: "" }));
+    } catch {
+      toast.error(`Failed to save ${provider} webhook secret`);
+    }
+  };
+
+  return (
+    <section
+      data-ocid="settings.webhook_secrets.section"
+      className="rounded-xl border border-border bg-card overflow-hidden"
+    >
+      <div className="px-5 py-4 border-b border-border">
+        <h2 className="font-display text-sm font-semibold text-foreground">
+          Webhook Signature Secrets
+        </h2>
+        <p className="text-[11px] text-muted-foreground mt-0.5">
+          Per-provider secrets used to verify incoming webhook signatures.
+          Secrets are stored securely and never returned to the frontend.
+        </p>
+      </div>
+
+      <div className="px-5 pb-6 pt-4 space-y-5">
+        {WEBHOOK_PROVIDERS.map(({ provider, label }) => (
+          <div key={provider} className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <Label
+                htmlFor={`webhook-secret-${provider.toLowerCase()}`}
+                className="text-xs text-muted-foreground uppercase tracking-wider"
+              >
+                {label} Webhook Secret
+              </Label>
+              {statusLoading ? (
+                <Loader2
+                  size={11}
+                  className="animate-spin text-muted-foreground"
+                />
+              ) : isConfigured(provider) ? (
+                <span className="inline-flex items-center gap-1 text-[11px] font-mono text-emerald-400">
+                  <CheckCircle2 size={11} />
+                  Secret configured
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 text-[11px] font-mono text-muted-foreground">
+                  <ShieldOff size={11} />
+                  Not configured
+                </span>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <div className="flex-1">
+                <PasswordInput
+                  id={`webhook-secret-${provider.toLowerCase()}`}
+                  placeholder={`Enter ${label} webhook secret`}
+                  value={secrets[provider]}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    setSecrets((prev) => ({
+                      ...prev,
+                      [provider]: e.target.value,
+                    }))
+                  }
+                  data-ocid={`settings.webhook_secrets.${provider.toLowerCase()}_input`}
+                />
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                data-ocid={`settings.webhook_secrets.${provider.toLowerCase()}_save_button`}
+                disabled={saveSecret.isPending || !secrets[provider].trim()}
+                onClick={() => handleSave(provider)}
+                className="min-w-[120px]"
+              >
+                {saveSecret.isPending && (
+                  <Loader2 size={13} className="animate-spin mr-1.5" />
+                )}
+                Save Secret
+              </Button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export default function CloudSettingsPage() {
   const { data: states } = useProviderStates();
 
@@ -1027,6 +1144,8 @@ export default function CloudSettingsPage() {
           </ProviderSection>
 
           <ThreatIntelSection />
+
+          <WebhookSecretSection />
         </div>
       </div>
     </Layout>

@@ -1,10 +1,11 @@
 import { createActor } from "@/backend";
+import { ProviderType as BackendProviderType } from "@/backend.d";
 import type {
   ComplianceFramework as BackendComplianceFramework,
   PollingInterval as BackendPollingInterval,
-  ProviderType as BackendProviderType,
 } from "@/backend.d";
 import { useActor } from "@caffeineai/core-infrastructure";
+import { Principal } from "@icp-sdk/core/principal";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   AlertRule,
@@ -38,6 +39,8 @@ import type {
   RevokeIamRequest,
   SearchResult,
   TimelineEvent,
+  UserAssignmentView,
+  WebhookSecretStatus,
 } from "../types";
 
 const STALE_30S = 30_000;
@@ -84,6 +87,89 @@ export function useProviderStates() {
     },
     enabled: !!actor && !isFetching,
     staleTime: STALE_30S,
+  });
+}
+
+// ── Per-provider access control hooks ──────────────────────────────────────
+
+export function useGetMyProviders() {
+  const { actor, isFetching } = useActor(createActor);
+  return useQuery<ProviderType[]>({
+    queryKey: ["myProviders"],
+    queryFn: async () => {
+      if (!actor) return [];
+      const raw = await actor.getMyProviders();
+      return (raw as BackendProviderType[]).map((p) =>
+        p === BackendProviderType.AWS
+          ? "AWS"
+          : p === BackendProviderType.Azure
+            ? "Azure"
+            : "GCP",
+      );
+    },
+    enabled: !!actor && !isFetching,
+    staleTime: STALE_30S,
+  });
+}
+
+export function useListUserAssignments() {
+  const { actor, isFetching } = useActor(createActor);
+  return useQuery<UserAssignmentView[]>({
+    queryKey: ["userAssignments"],
+    queryFn: async () => {
+      if (!actor) return [];
+      return actor.listUserAssignments() as Promise<UserAssignmentView[]>;
+    },
+    enabled: !!actor && !isFetching,
+    staleTime: STALE_30S,
+  });
+}
+
+export function useAssignProviderAccess() {
+  const { actor } = useActor(createActor);
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      principal,
+      providers,
+    }: {
+      principal: string;
+      providers: ProviderType[];
+    }) => {
+      if (!actor) throw new Error("Actor not ready");
+      return actor.assignProviderAccess(
+        Principal.fromText(principal),
+        providers.map(toBackendProvider),
+      );
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["userAssignments"] });
+      qc.invalidateQueries({ queryKey: ["myProviders"] });
+    },
+  });
+}
+
+export function useRemoveProviderAccess() {
+  const { actor } = useActor(createActor);
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      principal,
+      provider,
+    }: {
+      principal: string;
+      provider: ProviderType;
+    }) => {
+      if (!actor) throw new Error("Actor not ready");
+      return actor.removeProviderAccess(
+        Principal.fromText(principal),
+        toBackendProvider(provider),
+      );
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["userAssignments"] });
+      qc.invalidateQueries({ queryKey: ["myProviders"] });
+    },
   });
 }
 
@@ -1005,6 +1091,42 @@ export function useSaveEnrichmentKeys() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["enrichmentKeys"] });
+    },
+  });
+}
+
+// ── Webhook secret hooks ──────────────────────────────────────────────────
+
+export function useGetWebhookSecretStatus() {
+  const { actor, isFetching } = useActor(createActor);
+  return useQuery<WebhookSecretStatus>({
+    queryKey: ["webhookSecretStatus"],
+    queryFn: async () => {
+      if (!actor) return { awsSet: false, azureSet: false, gcpSet: false };
+      return actor.getWebhookSecretStatus();
+    },
+    enabled: !!actor && !isFetching,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: false,
+  });
+}
+
+export function useSaveWebhookSecret() {
+  const { actor, isFetching } = useActor(createActor);
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      provider,
+      secret,
+    }: {
+      provider: ProviderType;
+      secret: string;
+    }) => {
+      if (!actor || isFetching) throw new Error("Actor not ready");
+      return actor.saveWebhookSecret(toBackendProvider(provider), secret);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["webhookSecretStatus"] });
     },
   });
 }

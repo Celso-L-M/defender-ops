@@ -27,7 +27,16 @@ export interface SearchResult {
 export interface TransformationOutput {
     status: bigint;
     body: Uint8Array;
-    headers: Array<http_header>;
+    headers: Array<HttpHeader>;
+}
+export interface UserAssignmentView {
+    principal: string;
+    providers: Array<ProviderType>;
+}
+export interface HttpRequestResult {
+    status: bigint;
+    body: Uint8Array;
+    headers: Array<HttpHeader>;
 }
 export interface CorrelatedIncident {
     status: IncidentStatus;
@@ -45,6 +54,10 @@ export interface CorrelatedIncident {
     correlationWindowMinutes: bigint;
     incidentType: string;
 }
+export interface Result__1 {
+    hasMore: boolean;
+    rows: Array<Array<Cell>>;
+}
 export type Result_1 = {
     __kind__: "ok";
     ok: string;
@@ -52,18 +65,6 @@ export type Result_1 = {
     __kind__: "err";
     err: string;
 };
-export interface GeneratedReport {
-    csvData?: string;
-    customer: string;
-    providerScope: Array<string>;
-    generatedAt: string;
-    generatedBy: string;
-    dateRangeStart: string;
-    dateRangeEnd: string;
-    reportType: string;
-    reportId: string;
-    format: string;
-}
 export interface NotificationLog {
     id: string;
     status: NotificationStatus;
@@ -75,6 +76,18 @@ export interface NotificationLog {
     acknowledged: boolean;
     timestamp: bigint;
     channel: NotificationChannel;
+}
+export interface GeneratedReport {
+    csvData?: string;
+    customer: string;
+    providerScope: Array<string>;
+    generatedAt: string;
+    generatedBy: string;
+    dateRangeStart: string;
+    dateRangeEnd: string;
+    reportType: string;
+    reportId: string;
+    format: string;
 }
 export interface TimelineEvent {
     id: string;
@@ -99,7 +112,7 @@ export interface ComplianceControl {
 }
 export interface TransformationInput {
     context: Uint8Array;
-    response: http_request_result;
+    response: HttpRequestResult;
 }
 export interface MitreDetail {
     techniqueName: string;
@@ -114,6 +127,10 @@ export type ConnectionTestResult = {
     __kind__: "Failure";
     Failure: string;
 };
+export interface Cell {
+    value: Value;
+    name: string;
+}
 export interface Asset {
     id: string;
     region: string;
@@ -127,21 +144,25 @@ export interface Asset {
     riskScore: bigint;
     openFindings: bigint;
 }
-export interface AlertRule {
-    id: string;
-    region?: string;
-    escalationRecipient?: string;
-    severityThreshold?: RuleSeverityThreshold;
-    provider?: ProviderType;
-    customer: string;
-    assetId?: string;
-    name: string;
-    escalationMinutes?: bigint;
-    channels: Array<NotificationChannel>;
-    cooldownMinutes: bigint;
-    enabled: boolean;
-    findingType?: string;
-}
+export type Value = {
+    __kind__: "int";
+    int: bigint;
+} | {
+    __kind__: "nat";
+    nat: bigint;
+} | {
+    __kind__: "float";
+    float: number;
+} | {
+    __kind__: "bool";
+    bool: boolean;
+} | {
+    __kind__: "null";
+    null: null;
+} | {
+    __kind__: "text";
+    text: string;
+};
 export interface ProviderPollingState {
     status: PollingStatus;
     provider: ProviderType;
@@ -188,6 +209,21 @@ export interface ComplianceTrendEntry {
     score: bigint;
     weekTimestamp: bigint;
 }
+export interface AlertRule {
+    id: string;
+    region?: string;
+    escalationRecipient?: string;
+    severityThreshold?: RuleSeverityThreshold;
+    provider?: ProviderType;
+    customer: string;
+    assetId?: string;
+    name: string;
+    escalationMinutes?: bigint;
+    channels: Array<NotificationChannel>;
+    cooldownMinutes: bigint;
+    enabled: boolean;
+    findingType?: string;
+}
 export interface AuditLogEntry {
     id: string;
     action: string;
@@ -228,6 +264,10 @@ export interface NormalizedAlert {
     severity: Severity;
     enrichment?: AlertEnrichment;
 }
+export interface HttpHeader {
+    value: string;
+    name: string;
+}
 export interface RawFinding {
     id: string;
     region?: string;
@@ -240,14 +280,10 @@ export interface RawFinding {
     timestamp: bigint;
     severity: Severity;
 }
-export interface http_header {
-    value: string;
-    name: string;
-}
-export interface http_request_result {
-    status: bigint;
-    body: Uint8Array;
-    headers: Array<http_header>;
+export interface MitreTag {
+    techniqueId: string;
+    technique: string;
+    tactic: string;
 }
 export interface GcpCredentials {
     serviceAccountJson: string;
@@ -263,11 +299,6 @@ export type Result = {
     __kind__: "err";
     err: string;
 };
-export interface MitreTag {
-    techniqueId: string;
-    technique: string;
-    tactic: string;
-}
 export interface CorrelationStats {
     totalAllTime: bigint;
     byType: Array<[string, bigint]>;
@@ -380,6 +411,12 @@ export interface backendInterface {
      */
     acknowledgeNotification(logId: string): Promise<boolean>;
     /**
+     * / Admin: assign (replace) the full set of providers a principal may access.
+     * / Composes with the existing requireAuth guard (rejects anonymous callers).
+     * / ProviderType is a closed variant, so every element is a known provider.
+     */
+    assignProviderAccess(principal: Principal, providers: Array<ProviderType>): Promise<void>;
+    /**
      * / Block an IP address across one or more cloud providers.
      * / dryRun=true returns a preview without making any API calls.
      */
@@ -420,6 +457,7 @@ export interface backendInterface {
         severity: string;
         dryRun: boolean;
     }): Promise<PlaybookResult>;
+    execute(qJson: string): Promise<Result__1>;
     /**
      * / Export compliance report as CSV text.
      */
@@ -448,6 +486,7 @@ export interface backendInterface {
     }): Promise<Result>;
     /**
      * / Find a single alert by its ID.
+     * / Requires the caller to be assigned to the alert's provider.
      */
     getAlertById(id: string): Promise<NormalizedAlert | null>;
     /**
@@ -456,18 +495,23 @@ export interface backendInterface {
     getAlertRules(customer: string): Promise<Array<AlertRule>>;
     /**
      * / Return normalized alerts whose id matches any entry in alertIds.
+     * / Scoped to the providers the caller is assigned to.
      */
     getAlertsForCorrelation(alertIds: Array<string>): Promise<Array<NormalizedAlert>>;
+    getApiDoc(): Promise<string>;
     /**
      * / Find a single asset by its ID.
+     * / Requires the caller to be assigned to the asset's provider.
      */
     getAssetById(id: string): Promise<Asset | null>;
     /**
      * / Return all open/in-progress normalized alerts for a given asset.
+     * / Scoped to the providers the caller is assigned to.
      */
     getAssetFindings(assetId: string): Promise<Array<NormalizedAlert>>;
     /**
      * / Return assets matching the provided filter criteria.
+     * / Scoped to the providers the caller is assigned to.
      */
     getAssets(filter: {
         region?: string;
@@ -487,6 +531,7 @@ export interface backendInterface {
     getComplianceControlGaps(framework: ComplianceFramework): Promise<Array<ComplianceControl>>;
     /**
      * / Return compliance status for a framework, counting passing/failing findings per control.
+     * / Scoped to the providers the caller is assigned to.
      */
     getComplianceStatus(framework: ComplianceFramework, provider: ProviderType | null): Promise<{
         total: bigint;
@@ -501,19 +546,23 @@ export interface backendInterface {
     getComplianceTrend(framework: ComplianceFramework): Promise<Array<ComplianceTrendEntry>>;
     /**
      * / Return a correlated incident by its incidentId, or null if not found.
+     * / Requires the caller to be assigned to one of the incident's source providers.
      */
     getCorrelatedIncidentById(id: string): Promise<CorrelatedIncident | null>;
     /**
      * / Return the most recent `limit` correlated incidents sorted by detectedAt descending.
+     * / Scoped to incidents touching providers the caller is assigned to.
      */
     getCorrelatedIncidents(limit: bigint): Promise<Array<[string, CorrelatedIncident]>>;
     /**
      * / Return aggregated correlation statistics for the dashboard panel.
+     * / Scoped to incidents touching providers the caller is assigned to.
      */
     getCorrelationStats(): Promise<CorrelationStats>;
     /**
      * / Return the health status of each provider's credentials.
      * / Checks in-memory token cache expiry; no network call.
+     * / Scoped to the providers the caller is assigned to.
      */
     getCredentialHealth(): Promise<Array<CredentialHealthStatus>>;
     /**
@@ -526,6 +575,7 @@ export interface backendInterface {
     /**
      * / Return failed ingestion records, optionally filtered by provider.
      * / provider field is returned as Text to avoid Candid variant decoding issues on the frontend.
+     * / Scoped to the providers the caller is assigned to.
      */
     getFailedIngestions(provider: ProviderType | null, limit: bigint): Promise<Array<{
         id: string;
@@ -538,10 +588,16 @@ export interface backendInterface {
     }>>;
     /**
      * / Return aggregated ingestion statistics for the dashboard.
+     * / Scoped to the providers the caller is assigned to.
      */
     getIngestionStats(): Promise<IngestionStats>;
     /**
+     * / Frontend: read the current caller's assigned providers.
+     */
+    getMyProviders(): Promise<Array<ProviderType>>;
+    /**
      * / Return normalized alerts matching the provided filter criteria.
+     * / Scoped to the providers the caller is assigned to.
      */
     getNormalizedAlerts(filter: {
         status?: AlertStatus;
@@ -560,6 +616,7 @@ export interface backendInterface {
     /**
      * / Return per-provider pipeline health stats for the dashboard.
      * / provider field is returned as Text to avoid Candid variant decoding issues on the frontend.
+     * / Scoped to the providers the caller is assigned to.
      */
     getPipelineHealth(): Promise<Array<{
         provider: string;
@@ -571,11 +628,13 @@ export interface backendInterface {
     }>>;
     /**
      * / Return per-provider polling state (status, last poll time, error info).
+     * / Scoped to the providers the caller is assigned to.
      */
     getProviderStates(): Promise<Array<ProviderPollingState>>;
     /**
      * / Return paginated raw findings for a given provider.
      * / limit: max items to return (default 100, max 500). offset: starting index.
+     * / Requires the caller to be assigned to the requested provider.
      */
     getRawFindings(provider: ProviderType, limit: bigint, offset: bigint): Promise<{
         hasMore: boolean;
@@ -599,10 +658,21 @@ export interface backendInterface {
     getReports(customer: string): Promise<Array<GeneratedReport>>;
     /**
      * / Return recent timeline events for a customer, sorted by timestamp descending.
+     * / Scoped to the providers the caller is assigned to.
      */
     getTimeline(customer: string, limit: bigint): Promise<Array<TimelineEvent>>;
     /**
+     * / Return which providers have a webhook secret configured (booleans only —
+     * / never the secret values).
+     */
+    getWebhookSecretStatus(): Promise<{
+        azureSet: boolean;
+        gcpSet: boolean;
+        awsSet: boolean;
+    }>;
+    /**
      * / Return aggregated webhook statistics for the dashboard.
+     * / Scoped to the providers the caller is assigned to.
      */
     getWebhookStats(): Promise<{
         webhookNormalizationRate: number;
@@ -611,6 +681,7 @@ export interface backendInterface {
     /**
      * / Search across alerts, assets, and audit log.
      * / maxResults: cap total results (default 100, max 500). hasMore indicates truncation.
+     * / Scoped to the providers the caller is assigned to.
      */
     globalSearch(query: string, customer: string, maxResults: bigint): Promise<{
         hasMore: boolean;
@@ -654,6 +725,14 @@ export interface backendInterface {
         dryRun: boolean;
     }): Promise<PlaybookResult>;
     /**
+     * / Admin: list all users and their provider assignments.
+     */
+    listUserAssignments(): Promise<Array<UserAssignmentView>>;
+    /**
+     * / Admin: remove a single provider from a principal's access.
+     */
+    removeProviderAccess(principal: Principal, provider: ProviderType): Promise<void>;
+    /**
      * / Revoke IAM credentials for a user/service account across providers.
      */
     revokeIamCredentials(req: {
@@ -695,6 +774,12 @@ export interface backendInterface {
         reportType: string;
         recipients: Array<string>;
     }): Promise<void>;
+    /**
+     * / Save the webhook signature secret for a provider.
+     * / The secret value is stored write-only and is never returned to the frontend.
+     */
+    saveWebhookSecret(provider: ProviderType, secret: string): Promise<void>;
+    schema(): Promise<string>;
     /**
      * / Seed 4 mock normalized alerts (idempotent) and run the correlation engine.
      * / Returns the newly detected correlated incidents. Gated behind auth.
