@@ -99,12 +99,15 @@ const alerts: NormalizedAlert[] = [
   },
 ];
 
+const useNormalizedAlertsPageMock = vi.fn();
 const useNormalizedAlertsMock = vi.fn();
 const useUpdateAlertStatusMock = vi.fn();
 const useUpdateAlertOwnerMock = vi.fn();
 const useEnrichAlertMock = vi.fn();
 
 vi.mock("../hooks/use-backend", () => ({
+  useNormalizedAlertsPage: (...args: unknown[]) =>
+    useNormalizedAlertsPageMock(...args),
   useNormalizedAlerts: (...args: unknown[]) => useNormalizedAlertsMock(...args),
   useUpdateAlertStatus: (...args: unknown[]) =>
     useUpdateAlertStatusMock(...args),
@@ -132,6 +135,13 @@ function renderPage() {
 describe("AlertsPage (characterize)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    useNormalizedAlertsPageMock.mockReturnValue({
+      data: { items: alerts },
+      isLoading: false,
+      isFetching: false,
+      isError: false,
+      error: null,
+    });
     useNormalizedAlertsMock.mockReturnValue({ data: alerts, isLoading: false });
     useUpdateAlertStatusMock.mockReturnValue({
       mutateAsync: vi.fn().mockResolvedValue(undefined),
@@ -204,7 +214,13 @@ describe("AlertsPage (characterize)", () => {
   });
 
   it("shows the empty state when no alerts match", async () => {
-    useNormalizedAlertsMock.mockReturnValue({ data: [], isLoading: false });
+    useNormalizedAlertsPageMock.mockReturnValue({
+      data: { items: [] },
+      isLoading: false,
+      isFetching: false,
+      isError: false,
+      error: null,
+    });
     renderPage();
     expect(screen.getByTestId("alerts.empty_state")).toBeInTheDocument();
   });

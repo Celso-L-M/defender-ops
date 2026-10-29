@@ -20,6 +20,7 @@ const FailedIngestionPage = React.lazy(
 );
 const CorrelationPage = React.lazy(() => import("./pages/CorrelationPage"));
 const ReportsPage = React.lazy(() => import("./pages/ReportsPage"));
+const DashboardPage = React.lazy(() => import("./pages/DashboardPage"));
 const ProviderOverviewPage = React.lazy(
   () => import("./pages/ProviderOverviewPage"),
 );
@@ -32,12 +33,29 @@ const ProviderAccessPage = React.lazy(
   () => import("./pages/ProviderAccessPage"),
 );
 const VaultPage = React.lazy(() => import("./pages/VaultPage"));
+const AlertRulesPage = React.lazy(() => import("./pages/AlertRulesPage"));
+const NotificationSettingsPage = React.lazy(
+  () => import("./pages/NotificationSettingsPage"),
+);
+const NotificationCenterPage = React.lazy(
+  () => import("./pages/NotificationCenterPage"),
+);
 
 const rootRoute = createRootRoute();
 
 const overviewRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
+  component: () => (
+    <Suspense fallback={<LoadingSpinner className="h-screen" size={32} />}>
+      <DashboardPage />
+    </Suspense>
+  ),
+});
+
+const providerOverviewRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/provider-overview",
   component: () => (
     <Suspense fallback={<LoadingSpinner className="h-screen" size={32} />}>
       <ProviderOverviewPage />
@@ -204,8 +222,39 @@ const reportsRoute = createRoute({
   ),
 });
 
+const alertRulesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/alert-rules",
+  component: () => (
+    <Suspense fallback={<LoadingSpinner className="h-screen" size={32} />}>
+      <AlertRulesPage />
+    </Suspense>
+  ),
+});
+
+const notificationSettingsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/notification-settings",
+  component: () => (
+    <Suspense fallback={<LoadingSpinner className="h-screen" size={32} />}>
+      <NotificationSettingsPage />
+    </Suspense>
+  ),
+});
+
+const notificationCenterRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/notification-center",
+  component: () => (
+    <Suspense fallback={<LoadingSpinner className="h-screen" size={32} />}>
+      <NotificationCenterPage />
+    </Suspense>
+  ),
+});
+
 const routeTree = rootRoute.addChildren([
   overviewRoute,
+  providerOverviewRoute,
   awsDashboardRoute,
   azureDashboardRoute,
   gcpDashboardRoute,
@@ -222,6 +271,9 @@ const routeTree = rootRoute.addChildren([
   failedIngestionRoute,
   correlationRoute,
   reportsRoute,
+  alertRulesRoute,
+  notificationSettingsRoute,
+  notificationCenterRoute,
 ]);
 
 const router = createRouter({ routeTree });

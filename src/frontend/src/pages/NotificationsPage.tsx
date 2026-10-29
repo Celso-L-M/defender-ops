@@ -26,11 +26,11 @@ import {
   Bell,
   BellOff,
   CheckCheck,
+  CheckCircle2,
   Circle,
   Plus,
   Shield,
   Trash2,
-  X,
 } from "lucide-react";
 import React, { useState } from "react";
 import { Layout } from "../components/Layout";
@@ -105,6 +105,20 @@ function StatusBadge({ status }: { status: NotificationStatus }) {
       className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-semibold font-mono uppercase tracking-wide ${STATUS_COLORS[status]}`}
     >
       {status}
+    </span>
+  );
+}
+
+function AckBadge({ acknowledged }: { acknowledged: boolean }) {
+  return acknowledged ? (
+    <span className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-semibold font-mono uppercase tracking-wide bg-chart-2/20 text-chart-2 border border-chart-2/40">
+      <CheckCircle2 size={11} />
+      Acknowledged
+    </span>
+  ) : (
+    <span className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-semibold font-mono uppercase tracking-wide bg-warning/20 text-warning border border-warning/40">
+      <Circle size={9} className="fill-warning" />
+      Pending
     </span>
   );
 }
@@ -725,6 +739,7 @@ function NotificationCenterTab() {
 function NotificationLogTab() {
   const [limit, setLimit] = useState(50);
   const { data: logs = [], isLoading } = useNotificationLogs(CUSTOMER, limit);
+  const ackMutation = useAcknowledgeNotification();
 
   return (
     <div className="space-y-3">
@@ -771,6 +786,9 @@ function NotificationLogTab() {
                   <TableHead className="text-xs text-muted-foreground w-28">
                     Status
                   </TableHead>
+                  <TableHead className="text-xs text-muted-foreground w-36">
+                    Acknowledgement
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -804,6 +822,24 @@ function NotificationLogTab() {
                     </TableCell>
                     <TableCell>
                       <StatusBadge status={log.status as NotificationStatus} />
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <AckBadge acknowledged={log.acknowledged} />
+                        {!log.acknowledged && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 px-2 text-[11px]"
+                            onClick={() => ackMutation.mutate(log.id)}
+                            disabled={ackMutation.isPending}
+                            data-ocid={`notifications.log.acknowledge_button.${idx + 1}`}
+                          >
+                            Ack
+                          </Button>
+                        )}
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}

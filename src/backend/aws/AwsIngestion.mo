@@ -89,7 +89,7 @@ module {
 
   func _blobToHex(b : Blob) : Text {
     var result = "";
-    for (byte in b.vals()) {
+    for (byte in b.values()) {
       result := result # byteToHex(byte);
     };
     result;
@@ -440,7 +440,7 @@ module {
     let host = "guardduty." # region # ".amazonaws.com";
     let uri = "/detector/" # detectorId # "/findings/get";
     var idsJsonBuf = "";
-    for (fid in findingIds.vals()) {
+    for (fid in findingIds.values()) {
       if (idsJsonBuf != "") idsJsonBuf := idsJsonBuf # ",";
       idsJsonBuf := idsJsonBuf # "\"" # fid # "\"";
     };
@@ -466,7 +466,7 @@ module {
     let accounts = extractJsonStrings(json, "AccountId");
     let severities = extractJsonStrings(json, "Numeric"); // GuardDuty uses Severity.Numeric
     var i = 0;
-    for (id in ids.vals()) {
+    for (id in ids.values()) {
       let title = if (i < titles.size()) titles[i] else "GuardDuty Finding";
       let desc = if (i < descriptions.size()) descriptions[i] else "";
       let account = if (i < accounts.size()) ?accounts[i] else null;
@@ -528,7 +528,7 @@ module {
     let accounts = extractJsonStrings(json, "AwsAccountId");
     let severities = extractJsonStrings(json, "Label"); // CRITICAL/HIGH/MEDIUM/LOW
     var i = 0;
-    for (id in ids.vals()) {
+    for (id in ids.values()) {
       let title = if (i < titles.size()) titles[i] else "Security Hub Finding";
       let desc = if (i < descriptions.size()) descriptions[i] else "";
       let account = if (i < accounts.size()) ?accounts[i] else null;
@@ -562,13 +562,13 @@ module {
   ) : async [RawFinding] {
     let allFindings = List.empty<RawFinding>();
     let detectors = await listDetectors(region, sessionToken, nowNs, transform);
-    for (detectorId in detectors.vals()) {
+    for (detectorId in detectors.values()) {
       let ids = await listGuardDutyFindings(region, detectorId, lastPoll, sessionToken, nowNs, transform);
       let findings = await getGuardDutyFindings(region, detectorId, ids, sessionToken, nowNs, transform);
-      for (f in findings.vals()) { allFindings.add(f) };
+      for (f in findings.values()) { allFindings.add(f) };
     };
     let shFindings = await getSecurityHubFindings(region, lastPoll, sessionToken, nowNs, transform);
-    for (f in shFindings.vals()) { allFindings.add(f) };
+    for (f in shFindings.values()) { allFindings.add(f) };
     allFindings.toArray();
   };
 
@@ -596,12 +596,12 @@ module {
         // Cap region iteration to avoid unbounded async fan-out
         let regionCount = if (creds.regions.size() > MAX_POLL_REGIONS) MAX_POLL_REGIONS else creds.regions.size();
         var regionIdx = 0;
-        label regionLoop for (region in creds.regions.vals()) {
+        label regionLoop for (region in creds.regions.values()) {
           if (regionIdx >= regionCount) break regionLoop;
           regionIdx += 1;
           try {
             let findings = await pollRegion(region, state.lastSuccessfulPoll, sessionToken, nowNs, transform);
-            for (f in findings.vals()) { allFindings.add(f) };
+            for (f in findings.values()) { allFindings.add(f) };
           } catch (_) {
             lastErr := ?("Region " # region # " failed");
           };

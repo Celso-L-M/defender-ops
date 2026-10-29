@@ -5,12 +5,14 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import {
   BarChart3,
   Bell,
+  BellRing,
   ChevronLeft,
   ChevronRight,
   ClipboardCheck,
   FileBarChart2,
   Filter,
   GitMerge,
+  Inbox,
   LayoutDashboard,
   List,
   Lock,
@@ -24,6 +26,7 @@ import {
   Shield,
   ShieldAlert,
   ShieldCheck,
+  SlidersHorizontal,
   XCircle,
 } from "lucide-react";
 import React from "react";
@@ -126,6 +129,30 @@ const navLinks = [
     label: "Reports",
     icon: FileBarChart2,
     ocid: "nav.reports_link",
+  },
+];
+
+// Detection & response links. These read customer-scoped alert rules,
+// notification routing and the notification log, so they are only shown to a
+// signed-in user who has at least one assigned provider.
+const detectionNavLinks = [
+  {
+    to: "/alert-rules",
+    label: "Alert Rules",
+    icon: SlidersHorizontal,
+    ocid: "nav.alert_rules_link",
+  },
+  {
+    to: "/notification-settings",
+    label: "Notification Settings",
+    icon: BellRing,
+    ocid: "nav.notification_settings_link",
+  },
+  {
+    to: "/notification-center",
+    label: "Notification Center",
+    icon: Inbox,
+    ocid: "nav.notification_center_link",
   },
 ];
 
@@ -325,23 +352,32 @@ export function Layout({ children }: Props) {
 
   const activeLabel =
     pathname === "/"
-      ? "Provider Overview"
-      : pathname.startsWith("/providers/aws")
-        ? "AWS Dashboard"
-        : pathname.startsWith("/providers/azure")
-          ? "Azure Dashboard"
-          : pathname.startsWith("/providers/gcp")
-            ? "GCP Dashboard"
-            : pathname.startsWith("/provider-access")
-              ? "Provider Access"
-              : pathname.startsWith("/vault")
-                ? "Cloud Vault"
-                : (navLinks.find((l) => pathname.startsWith(l.to))?.label ??
-                  (pathname.startsWith("/failed-ingestions")
-                    ? "Failed Ingestions"
-                    : pathname.startsWith("/assets/")
-                      ? "Asset Inventory"
-                      : "Overview"));
+      ? "Dashboard"
+      : pathname.startsWith("/provider-overview")
+        ? "Provider Overview"
+        : pathname.startsWith("/providers/aws")
+          ? "AWS Dashboard"
+          : pathname.startsWith("/providers/azure")
+            ? "Azure Dashboard"
+            : pathname.startsWith("/providers/gcp")
+              ? "GCP Dashboard"
+              : pathname.startsWith("/provider-access")
+                ? "Provider Access"
+                : pathname.startsWith("/vault")
+                  ? "Cloud Vault"
+                  : pathname.startsWith("/alert-rules")
+                    ? "Alert Rules"
+                    : pathname.startsWith("/notification-settings")
+                      ? "Notification Settings"
+                      : pathname.startsWith("/notification-center")
+                        ? "Notification Center"
+                        : (navLinks.find((l) => pathname.startsWith(l.to))
+                            ?.label ??
+                          (pathname.startsWith("/failed-ingestions")
+                            ? "Failed Ingestions"
+                            : pathname.startsWith("/assets/")
+                              ? "Asset Inventory"
+                              : "Overview"));
 
   return (
     <ProviderFilterProvider>
@@ -375,7 +411,7 @@ export function Layout({ children }: Props) {
             )}
             <Link
               to="/"
-              data-ocid="nav.provider_overview_link"
+              data-ocid="nav.dashboard_link"
               className={`flex items-center gap-3 rounded-md px-2.5 py-2 text-sm font-medium transition-smooth group
                 ${
                   pathname === "/"
@@ -391,7 +427,29 @@ export function Layout({ children }: Props) {
                     : "text-muted-foreground group-hover:text-foreground"
                 }`}
               />
-              {!collapsed && <span className="truncate">Overview</span>}
+              {!collapsed && <span className="truncate">Dashboard</span>}
+            </Link>
+            <Link
+              to="/provider-overview"
+              data-ocid="nav.provider_overview_link"
+              className={`flex items-center gap-3 rounded-md px-2.5 py-2 text-sm font-medium transition-smooth group
+                ${
+                  pathname.startsWith("/provider-overview")
+                    ? "bg-primary/15 text-primary border border-primary/25"
+                    : "text-muted-foreground hover:bg-muted/40 hover:text-foreground border border-transparent"
+                }`}
+            >
+              <Server
+                size={16}
+                className={`shrink-0 ${
+                  pathname.startsWith("/provider-overview")
+                    ? "text-primary"
+                    : "text-muted-foreground group-hover:text-foreground"
+                }`}
+              />
+              {!collapsed && (
+                <span className="truncate">Provider Overview</span>
+              )}
             </Link>
             {visibleProviderNav.map(
               ({ provider, to, label, ocid, accentClass }) => {
@@ -447,6 +505,38 @@ export function Layout({ children }: Props) {
                 </Link>
               );
             })}
+            {/* Detection & response — customer-scoped, gated on assigned providers */}
+            {isLoggedIn && visibleProviderNav.length > 0 && (
+              <>
+                {!collapsed && (
+                  <p className="px-2.5 pb-1 pt-4 font-mono text-[10px] text-muted-foreground uppercase tracking-widest">
+                    Detection
+                  </p>
+                )}
+                {detectionNavLinks.map(({ to, label, icon: Icon, ocid }) => {
+                  const isActive = pathname.startsWith(to);
+                  return (
+                    <Link
+                      key={to}
+                      to={to}
+                      data-ocid={ocid}
+                      className={`flex items-center gap-3 rounded-md px-2.5 py-2 text-sm font-medium transition-smooth group
+                        ${
+                          isActive
+                            ? "bg-primary/15 text-primary border border-primary/25"
+                            : "text-muted-foreground hover:bg-muted/40 hover:text-foreground border border-transparent"
+                        }`}
+                    >
+                      <Icon
+                        size={16}
+                        className={`shrink-0 ${isActive ? "text-primary" : "text-muted-foreground group-hover:text-foreground"}`}
+                      />
+                      {!collapsed && <span className="truncate">{label}</span>}
+                    </Link>
+                  );
+                })}
+              </>
+            )}
             {/* Failed Ingestions with alert badge */}
             {(() => {
               const to = "/failed-ingestions";

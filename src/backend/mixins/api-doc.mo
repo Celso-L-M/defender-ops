@@ -37,23 +37,32 @@ layers:
   `Unauthorized` trap. On provider-scoped reads that call
   `requireProviderAccess`, an anonymous caller also traps with `Unauthorized`.
 - **Signed-in callers** (any non-anonymous principal) pass the identity check.
-  There is no separate admin/owner role distinction in the current build; the
-  first signed-in caller to save credentials effectively becomes the operator.
+  The **first signed-in caller to reach a guarded method is recorded as the
+  owner (SYS_ADMIN)** and is authorized for every provider regardless of
+  per-provider assignment. Ownership is claimed once and never changes; a
+  canister controller is also always treated as the owner.
 - **Provider-scoped reads** (`getRawFindings`, `getNormalizedAlerts`,
   `getAlertById`, `getAssets`, `getAssetById`, `getComplianceStatus`,
   `getFailedIngestions`) call `requireProviderAccess` and trap with
   `Not authorized for provider` when the caller is not assigned to the requested
-  provider.
+  provider. The owner is never rejected.
 - **Provider-filtered reads** (`getProviderStates`, `getIngestionStats`,
   `getTimeline`, `getCorrelatedIncidents`, `getCorrelatedIncidentById`,
   `getCorrelationStats`, `getPipelineHealth`, `getWebhookStats`,
   `getAssetFindings`, `getAlertsForCorrelation`) do not trap; they silently
-  return only the rows whose provider the caller is assigned to. An anonymous or
-  unassigned caller receives an empty (or filtered) result.
+  return only the rows whose provider the caller is assigned to. The owner sees
+  every provider's rows. An anonymous or unassigned non-owner caller receives an
+  empty (or filtered) result.
 - **Public query methods** (`getComplianceTrend`, `getComplianceControlGaps`,
-  `exportComplianceCsv`, `exportCompliancePdf`, `getAlertRules`,
-  `getNotificationLogs`, `getAuditLog`, `hasAdminCredentials`) call no guard and
-  are callable by anyone, including anonymous callers.
+  `exportComplianceCsv`, `exportCompliancePdf`, `getAuditLog`,
+  `hasAdminCredentials`) call no guard and are callable by anyone, including
+  anonymous callers.
+- **Customer-scoped reads** (`getAlertRules`, `getNotificationLogs`) require a
+  signed-in caller and a non-empty `customer`; an anonymous caller traps with
+  `Unauthorized`, and an empty `customer` is rejected (an audit entry is written
+  and an empty list is returned) rather than treated as match-all. `getAlertRules`
+  additionally returns only rules whose `provider` is unset or assigned to the
+  caller.
 - Several \"read\" methods that expose configuration status (`getEnrichmentKeys`,
   `getWebhookSecretStatus`, `getReports`, `getReportCsv`, `getReportEmailConfig`)
   are declared as `shared` (update) methods and DO call `requireAuth`, so they
@@ -81,6 +90,17 @@ remediation. Provider-scoped reads and remediation actions (`blockIp`,
 `forceGcpIamReview`, `escalateToIncident`) all enforce assignment via
 `requireProviderAccess`.
 
+### Owner (SYS_ADMIN)
+
+The **owner** is authorized for every provider regardless of per-provider
+assignment. The owner is either a canister controller or the principal recorded
+as owner on the first signed-in call: the first non-anonymous caller to reach a
+guarded method is recorded as the owner, and ownership is claimed once and never
+changes. The owner therefore sees every provider's data from the
+provider-filtered reads and is never rejected by `requireProviderAccess`. Every
+other signed-in caller remains scoped to the providers explicitly assigned to
+them, so per-customer and per-provider isolation is preserved for non-owners.
+
 ### Centralized secure vault
 
 The vault replaces the legacy per-provider credential forms
@@ -103,16 +123,16 @@ rest. The vault methods are:
 
 Every vault method first runs `requireVaultAccess(caller, provider, fnName)`,
 which rejects anonymous callers with an `Unauthorized` trap and then enforces
-per-provider access control. The owner (SYS_ADMIN / canister controller — the
-principal that is a controller of the canister, identified via
-`Principal.isController`) is granted access to every provider's vault
-regardless of per-provider assignment, so the owner can set up and manage
-secrets for all providers even before any `assignProviderAccess` has been
-issued. Non-owner users are restricted to only the providers they are assigned
-to: `requireProviderAccess` traps with `Not authorized for provider` when a
-non-owner caller is not assigned to the requested provider. Every successful
-create/update/delete/reveal writes an audit entry (`VaultSecretCreated` /
-`VaultSecretUpdated` / `VaultSecretDeleted` / `VaultSecretRevealed`).
+per-provider access control. The owner (SYS_ADMIN — a canister controller or the
+principal recorded as owner on the first signed-in call) is granted access to
+every provider's vault regardless of per-provider assignment, so the owner can
+set up and manage secrets for all providers even before any
+`assignProviderAccess` has been issued. Non-owner users are restricted to only
+the providers they are assigned to: `requireProviderAccess` traps with
+`Not authorized for provider` when a non-owner caller is not assigned to the
+requested provider. Every successful create/update/delete/reveal writes an audit
+entry (`VaultSecretCreated` / `VaultSecretUpdated` / `VaultSecretDeleted` /
+`VaultSecretRevealed`).
 
 **Encryption at rest.** Secrets are encrypted with a SHA-256-based
 authenticated scheme (CTR-mode keystream with an Encrypt-then-MAC integrity
@@ -123,6 +143,56 @@ mask (`••••••••`) is shown. Decryption verifies the integrity ta
 it does not match (tampered or corrupted data). Because the key is derived from
 `raw_rand` and held in memory, a canister upgrade does not rotate it; the key
 persists in stable state across upgrades.
+
+### Vault-backed provider credentials
+
+Each cloud provider has a **fixed typed credential schema**, stored as that
+provider's isolated vault secret under the reserved name `provider-credential`.
+The vault is the single source of truth: the legacy per-provider credential
+stable vars (`awsCredentials` / `azureCredentials` / `gcpCredentials`) and their
+save forms have been removed, so no credential is held in two places. The typed
+schemas are:
+
+- **AWS** — `roleArn` (required), `externalId` (optional), `regions` (required,
+  non-empty).
+- **Azure** — `clientId`, `clientSecret`, `tenantId` (all required),
+  `subscriptionIds` (required, non-empty).
+- **GCP** — `serviceAccountJson` (required), `projectIds` (required, non-empty).
+
+The credential methods are:
+
+- `getProviderCredentialStatus(provider)` — returns `{ provider, configured,
+  fields, updatedAt }`. `configured` is `false` when the provider's vault has no
+  credential entry. When configured, `fields` carries the **masked** structured
+  fields only (a fixed mask plus, for values longer than four characters, the
+  last four characters); plaintext is never returned.
+- `saveProviderCredential(input)` — stores a provider's typed credential.
+  Returns `#InvalidCredential(message)` when a required field is missing, and
+  `#VaultError(\"credential already exists\")` when one is already stored.
+- `updateProviderCredential(input)` — overwrites an existing credential.
+  Returns `#NotFound` when none is stored yet.
+- `clearProviderCredential(provider)` — removes the credential. Returns
+  `#NotFound` when none is stored.
+- `testProviderConnection(provider)` — resolves the credential from the
+  provider's vault entry and tests it against the live API. When the provider is
+  unconfigured it returns a `#Failure` without attempting a connection.
+
+Every credential method first runs `requireCredentialAccess`, which rejects
+anonymous callers with an `Unauthorized` trap and then enforces per-provider
+access control: the owner (SYS_ADMIN) is granted access to every provider's
+credential regardless of per-provider assignment; non-owner users are restricted
+to the providers they are assigned to (`requireProviderAccess` traps with
+`Not authorized for provider`). Every successful create/update/clear writes an
+audit entry (`ProviderCredentialCreated` / `ProviderCredentialUpdated` /
+`ProviderCredentialCleared`).
+
+**Unconfigured providers.** When a provider's vault has no credential entry, its
+pipeline reports an unconfigured state and does not attempt to poll or connect:
+`getProviderCredentialStatus` returns `configured = false`, `getCredentialHealth`
+reports `#Error(\"No credentials configured\")`, `getIngestionStats` does not count
+it as active, `triggerPoll` is a no-op for it, and the connection tests
+(`testAwsConnection` / `testAzureConnection` / `testGcpConnection` and
+`testProviderConnection`) return a `#Failure` without a network call.
 
 ### Identity derivation
 
@@ -147,7 +217,10 @@ the identity check only requires a non-anonymous caller, an unregistered but
 signed-in principal still passes `requireAuth`; however, it is not assigned to
 any provider, so provider-scoped reads and remediation trap with
 `Not authorized for provider` until an operator calls `assignProviderAccess` for
-it.
+it. The **first** signed-in caller to reach a guarded method is recorded as the
+owner (SYS_ADMIN) and is authorized for every provider without an explicit
+assignment; later callers are not owners and remain scoped to their
+assignments.
 
 ## Units & Encodings
 
@@ -243,6 +316,12 @@ heartbeat, not inline.
   overwrites an existing secret in place. `deleteVaultSecret` is idempotent
   (returns `#NotFound` when the secret is absent). Re-saving the same value
   re-encrypts it with a fresh timestamp.
+- **Provider credentials**: `saveProviderCredential` returns
+  `#VaultError(\"credential already exists\")` when a credential is already stored
+  for the provider; `updateProviderCredential` overwrites it in place and returns
+  `#NotFound` when none is stored. `clearProviderCredential` is idempotent
+  (returns `#NotFound` when absent). Re-saving the same value re-encrypts it with
+  a fresh timestamp.
 - **Webhook secrets**: `saveWebhookSecret` overwrites the per-provider secret.
   There is no versioned-key rotation in this build; rotating means calling
   `saveWebhookSecret` again with a new value.
@@ -258,6 +337,7 @@ heartbeat, not inline.
   `\"id exceeds max length\"` when an identifier exceeds 512 characters.
 - **Pagination**: `getRawFindings` clamps `limit` to a maximum of 500 (default
   100). `globalSearch` clamps `maxResults` to a maximum of 500 (default 100).
+  `getNormalizedAlerts` is cursor-paginated (see below).
 - **Playbook results**: remediation methods return a `PlaybookResult` with a
   `success` flag and a human-readable `message`; they do not trap on provider
   API failures but record the error in `rawApiError` and the audit log.
@@ -278,15 +358,112 @@ raw findings, normalized alerts, assets, compliance controls, compliance trend,
 alert rules, notification logs, timeline events, audit log, failed ingestions,
 pipeline events, correlated incidents, generated reports, report email configs,
 per-provider polling states (`providerPollingState`), per-provider access
-assignments (`providerAssignment`, one row per principal/provider pair), and
-vault entries (`vaultEntry`).
+assignments (`providerAssignment`, one row per principal/provider pair), vault
+entries (`vaultEntry`), provider credential status (`providerCredential`,
+one row per provider with a `configured` flag and masked field summary), report
+runs (`reportRun`), report recipient configs (`reportRecipientConfig`),
+notification routings (`notificationRouting`), rate-limit backoff state
+(`rateLimitState`), and throttling events (`throttleEvent`).
 **Secret values are never exposed**: webhook secrets, enrichment API keys, cloud
 credentials, and the encrypted vault ciphertext/nonce/plaintext are write-only
 and absent from the OQL schema. The `vaultEntry` entity exposes ONLY non-sensitive
 vault metadata — `provider`, `name`, `createdAt`, `updatedAt`, and a fixed
 `maskedValue` mask — never the encrypted blob, nonce, or any plaintext secret.
+The `providerCredential` entity likewise exposes only the `configured` flag, a
+masked field summary, and `updatedAt` — never a plaintext credential value.
 Sensitive payload fields (e.g. failed-ingestion raw payloads, report CSV data,
 notification recipients) are also omitted from the queryable surface.
+
+## Cursor-paginated alerts
+
+`getNormalizedAlerts(filter)` returns a page of normalized alerts plus an opaque
+next-page cursor:
+
+    { items : [NormalizedAlert]; nextCursor : ?Text }
+
+- `filter.cursor` is `null` for the first page. Pass the returned `nextCursor`
+  back verbatim to fetch the next page; `nextCursor` is `null` when the page is
+  the last one.
+- The cursor encodes the last item's `(timestamp, id)` sort key, so it stays
+  stable across inserts and deletes — unlike an array offset, which would skip
+  or repeat rows when new alerts arrive between pages.
+- Ordering is newest-first by `timestamp`, then by `id` descending as a
+  tie-breaker. A malformed cursor is treated as the first page rather than
+  trapping.
+- `filter.limit` is the page size; `0` means the default page size (100).
+- The existing `provider`, `severity`, `status` and `customer` filters are
+  preserved, and results remain scoped to the providers the caller is assigned
+  to.
+
+## Reporting
+
+Scheduled and on-demand report runs are recorded and emailed to the configured
+recipients per report type:
+
+- `getReportRuns(customer, limit)` — report runs for a customer, newest first.
+- `getReportRun(runId, customer)` — a single run, scoped to the caller's
+  customer.
+- `getReportRecipients(reportType, customer)` — the recipient configuration.
+- `saveReportRecipients(config)` — upsert the recipient configuration; every
+  address is validated and the first invalid address rejects the whole config
+  with `#InvalidRecipient(reason)`.
+- `runReportOnDemand(reportType, periodStart, periodEnd, customer,
+  providerScope)` — run a report for an explicit date range, email it, and
+  record the run with per-recipient delivery outcomes. Returns
+  `#InvalidPeriod` when the range is invalid.
+- `runScheduledReport(reportType, trigger, customer, providerScope)` — record a
+  scheduled (weekly or monthly) run. The weekly period is the previous 7 days;
+  the monthly period is the previous calendar month.
+- `exportReportPdf(reportType, periodStart, periodEnd, customer,
+  providerScope)` — a **query** that returns the branded PDF-1.4 bytes
+  (`Blob`) for a generated report, including the executive summary, table of
+  contents and a chart of per-run delivery counts.
+
+All reporting methods require a signed-in caller and a non-empty `customer`;
+unauthorized attempts are recorded in the audit log.
+
+## Notification routing
+
+Alert rules are matched against each new alert and delivered across the
+configured channels:
+
+- `getAlertRules(customer)` / `saveAlertRule(rule)` / `deleteAlertRule(id)` —
+  manage rules. `saveAlertRule` is an upsert keyed by `rule.id`. `getAlertRules`
+  requires a signed-in caller and a non-empty `customer`, and returns only rules
+  for that customer whose `provider` is unset or assigned to the caller.
+- `getNotificationLogs(customer, limit)` — the immutable log of every delivery
+  attempt. Requires a signed-in caller and a non-empty `customer`; an empty
+  `customer` is rejected rather than treated as match-all.
+- `acknowledgeNotification(id)` — mark a notification acknowledged.
+- Routing is per customer: `NotificationRouting` carries the customer's Teams
+  webhook URL, email recipients, cooldown and escalation window.
+
+When a new alert is stored, the router plans deliveries for every matching,
+enabled rule that is not suppressed by its cooldown (default 1 hour when the
+rule sets `cooldownMinutes = 0`). Each planned delivery is performed and
+recorded as a `NotificationLog` entry:
+
+- **InApp** — recorded in the log only (surfaced in the UI).
+- **Email** — one email per configured recipient via the email extension.
+- **TeamsWebhook** — one MessageCard POST to the customer's webhook URL, sent
+  as a non-replicated outcall so a single message is sent once.
+
+A failed send never throws; it is recorded as a `#Failed` log entry.
+
+## Rate-limit backoff
+
+When a provider throttles a poll (HTTP 429 / rate-limit / too-many-requests),
+the ingestion path records a throttling event and advances the provider's
+exponential backoff:
+
+- `getRateLimitStates()` — the backoff state for every tracked provider.
+- `getThrottleEvents(provider, limit)` — recent throttling events, newest
+  first; an explicit provider filter is access-checked.
+- `resetProviderBackoff(provider)` — clear a provider's backoff after a
+  successful poll.
+
+A clean poll clears any accumulated backoff automatically. Backoff state is
+surfaced on the dashboard.
 
 ## Non-obvious Gotchas
 
@@ -306,8 +483,10 @@ notification recipients) are also omitted from the queryable surface.
 - Provider-scoped reads fall into two behaviors: methods that call
   `requireProviderAccess` trap with `Not authorized for provider` when the
   caller is unassigned, while provider-filtered reads silently return only the
-  assigned providers' rows. A signed-in caller with no assignment therefore sees
-  empty results from the filtered reads but traps on the guarded reads.
+  assigned providers' rows. A signed-in non-owner caller with no assignment
+  therefore sees empty results from the filtered reads but traps on the guarded
+  reads. The owner (SYS_ADMIN) is exempt from both: it is authorized for every
+  provider and sees every provider's rows.
 - `assignProviderAccess` replaces the whole assignment list for a principal; to
   add a provider to an existing assignment, pass the union of the current and
   new providers.

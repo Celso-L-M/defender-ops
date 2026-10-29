@@ -40,14 +40,26 @@ import PerProviderAccessControlApi "mixins/per-provider-access-control-api";
 import PerProviderAccessControl "lib/per-provider-access-control";
 import VaultApi "mixins/vault-api";
 import VaultTypes "types/vault";
+import ProviderCredentials "lib/provider-credentials";
+import ProviderCredentialTypes "types/provider-credentials";
+import ProviderCredentialsApi "mixins/provider-credentials-api";
+import ReportingTypes "types/reporting";
+import NotificationTypes "types/notifications";
+import RateLimitTypes "types/rate-limit";
+import ReportingApi "mixins/reporting-api";
+import NotificationsApi "mixins/notifications-api";
+import RateLimitApi "mixins/rate-limit-api";
+import AlertPagination "lib/alert-pagination";
+import NotificationRouter "notifications/NotificationRouter";
+import TeamsWebhook "notifications/TeamsWebhook";
+import NotificationsLib "lib/notifications";
+import RateLimitLib "lib/rate-limit";
+import EmailClient "mo:caffeineai-email/emailClient";
 
 actor {
 
   // ── Stable state (initialised by migration chain) ─────────────────────────
 
-  var awsCredentials : ?Types.AwsCredentials;
-  var azureCredentials : ?Types.AzureCredentials;
-  var gcpCredentials : ?Types.GcpCredentials;
   var awsPollingState : Types.ProviderPollingState;
   var azurePollingState : Types.ProviderPollingState;
   var gcpPollingState : Types.ProviderPollingState;
@@ -115,6 +127,21 @@ actor {
   // (provider, name) pair to its encrypted entry; `key` is the SHA-256
   // encryption key seeded from raw_rand on the first vault write.
   let vaultState : VaultTypes.VaultState;
+
+  // ── Reporting, notification-routing and rate-limit stable state ───────────
+  // (initialised by migration chain)
+
+  var reportRuns : List.List<ReportingTypes.ReportRun>;
+  var reportRecipientConfigs : List.List<ReportingTypes.ReportRecipientConfig>;
+  var notificationRoutings : List.List<NotificationTypes.NotificationRouting>;
+  var rateLimitStates : List.List<RateLimitTypes.RateLimitBackoffState>;
+  var throttleEvents : List.List<RateLimitTypes.ThrottleEvent>;
+
+  // ── Owner (SYS_ADMIN) principal ───────────────────────────────────────────
+  // Recorded on the first signed-in caller. The owner is authorized for every
+  // provider regardless of per-provider assignment. Null until the first
+  // authenticated call. (initialised by migration chain)
+  var ownerPrincipal : ?Principal;
 
   // ── In-memory token caches (NOT stable — discarded on restart) ────────────
   // Short-lived tokens are never written to stable memory per least-privilege policy
@@ -412,6 +439,8 @@ actor {
     };
     // Process next batch of raw findings (max 50 per heartbeat)
     await processRawFindingsIntoAlerts();
+    // Escalate unacknowledged notifications whose escalation window elapsed
+    ignore await runEscalationCheckInternal();
     // Recalculate risk scores for dirty assets only
     recalcDirtyAssets();
     // Refresh malicious IP feed every 6 hours
@@ -580,17 +609,39 @@ actor {
   };
 
   /// Trap with an Unauthorized error and log the attempt.
+  /// The first signed-in caller to reach a guarded method claims ownership
+  /// (SYS_ADMIN), so the operator is recognized without a separate setup step.
   func requireAuth(caller : Principal, fnName : Text) {
     if (not isAuthorized(caller)) {
       addAuditEntry(caller.toText(), "Unauthorized", "Rejected call to " # fnName, "");
       Runtime.trap("Unauthorized");
     };
+    claimOwnership(caller);
+  };
+
+  /// Record the first signed-in caller as the owner (SYS_ADMIN). Idempotent:
+  /// once an owner is recorded it never changes. Anonymous callers never claim.
+  func claimOwnership(caller : Principal) {
+    switch (ownerPrincipal) {
+      case (?_) {};
+      case null {
+        if (not caller.isAnonymous()) {
+          ownerPrincipal := ?caller;
+          addAuditEntry(caller.toText(), "OwnerClaimed", "First signed-in caller recorded as owner", "");
+        };
+      };
+    };
   };
 
   // ── Per-provider access control enforcement ──────────────────────────────
 
-  /// Returns true if the caller is assigned to the given provider.
+  /// Returns true if the caller may access the given provider. The owner
+  /// (SYS_ADMIN) is authorized for every provider; every other caller is
+  /// scoped to the providers explicitly assigned to them.
   func isProviderAssigned(caller : Principal, provider : Types.ProviderType) : Bool {
+    if (isOwner(caller)) {
+      return true;
+    };
     PerProviderAccessControl.isAssignedToProvider(providerAssignments, caller, provider)
   };
 
@@ -604,22 +655,30 @@ actor {
     };
   };
 
-  /// Returns true when the caller is the canister owner (SYS_ADMIN / canister
-  /// controller). The owner is granted access to every provider's vault
-  /// regardless of per-provider assignment, so they can set up and manage
-  /// secrets for all providers even before any `assignProviderAccess` is issued.
+  /// Returns true when the caller is the canister owner (SYS_ADMIN). The owner
+  /// is granted access to every provider regardless of per-provider assignment,
+  /// so they can set up and manage secrets for all providers even before any
+  /// `assignProviderAccess` is issued. The owner is either a canister controller
+  /// or the principal recorded as owner on the first signed-in call.
   func isOwner(caller : Principal) : Bool {
-    caller.isController()
+    if (caller.isController()) {
+      return true;
+    };
+    switch (ownerPrincipal) {
+      case (?owner) { Principal.equal(owner, caller) };
+      case null { false };
+    };
   };
 
   // ── Credential Management ────────────────────────────────────────────────
 
-  // The legacy per-provider credential forms (saveAwsCredentials /
-  // saveAzureCredentials / saveGcpCredentials) have been replaced by the
-  // centralized secure vault (saveVaultSecret / updateVaultSecret /
-  // deleteVaultSecret / listVaultSecrets / revealVaultSecret). The stable
-  // awsCredentials / azureCredentials / gcpCredentials vars remain for the
-  // polling/ingestion pipeline, which still reads them.
+  // Provider credentials are held ONLY in the centralized secure vault, as each
+  // provider's isolated typed credential entry (see ProviderCredentialsApi and
+  // lib/provider-credentials). The legacy per-provider credential forms
+  // (saveAwsCredentials / saveAzureCredentials / saveGcpCredentials) and their
+  // stable vars (awsCredentials / azureCredentials / gcpCredentials) have been
+  // removed; the polling/ingestion pipeline, connection tests, credential
+  // health, and remediation playbooks all resolve credentials from the vault.
 
   // ── Polling State & Stats ─────────────────────────────────────────────────
 
@@ -639,13 +698,9 @@ actor {
     });
     var totalFindingsToday = 0;
     var activeProviders = 0;
-    for (s in states.vals()) {
+    for (s in states.values()) {
       totalFindingsToday += s.findingsToday;
-      let hasCreds = switch (s.provider) {
-        case (#AWS)   awsCredentials.isSome();
-        case (#Azure) azureCredentials.isSome();
-        case (#GCP)   gcpCredentials.isSome();
-      };
+      let hasCreds = ProviderCredentials.isConfigured(vaultState, s.provider);
       if (hasCreds) { activeProviders += 1 };
     };
     {
@@ -672,31 +727,54 @@ actor {
   // ── Connection Testing ────────────────────────────────────────────────────
 
   /// Validate stored AWS credentials against the live API.
+  /// Resolves the credential from the AWS vault entry; reports not configured
+  /// when the vault has no AWS credential.
   public shared ({ caller }) func testAwsConnection() : async Types.ConnectionTestResult {
     requireAuth(caller, "testAwsConnection");
-    switch (awsCredentials) {
-      case null { #Failure("No AWS credentials configured") };
-      case (?creds) {
+    switch (ProviderCredentials.resolveAws(vaultState)) {
+      case null { #Failure("No AWS credential configured") };
+      case (?c) {
+        let creds : Types.AwsCredentials = {
+          roleArn = c.roleArn;
+          externalId = c.externalId;
+          regions = c.regions;
+        };
         await AwsIngestion.testConnection(creds, transform);
       };
     };
   };
 
   /// Validate stored Azure credentials against the live API.
+  /// Resolves the credential from the Azure vault entry; reports not configured
+  /// when the vault has no Azure credential.
   public shared ({ caller }) func testAzureConnection() : async Types.ConnectionTestResult {
     requireAuth(caller, "testAzureConnection");
-    switch (azureCredentials) {
-      case null     { #Failure("No Azure credentials configured") };
-      case (?creds) { await Azure.testConnection(creds, transform) };
+    switch (ProviderCredentials.resolveAzure(vaultState)) {
+      case null { #Failure("No Azure credential configured") };
+      case (?c) {
+        let creds : Types.AzureCredentials = {
+          clientId = c.clientId;
+          clientSecret = c.clientSecret;
+          tenantId = c.tenantId;
+          subscriptionIds = c.subscriptionIds;
+        };
+        await Azure.testConnection(creds, transform);
+      };
     };
   };
 
   /// Validate stored GCP credentials against the live API.
+  /// Resolves the credential from the GCP vault entry; reports not configured
+  /// when the vault has no GCP credential.
   public shared ({ caller }) func testGcpConnection() : async Types.ConnectionTestResult {
     requireAuth(caller, "testGcpConnection");
-    switch (gcpCredentials) {
-      case null { #Failure("No GCP credentials configured") };
-      case (?creds) {
+    switch (ProviderCredentials.resolveGcp(vaultState)) {
+      case null { #Failure("No GCP credential configured") };
+      case (?c) {
+        let creds : Types.GcpCredentials = {
+          serviceAccountJson = c.serviceAccountJson;
+          projectIds = c.projectIds;
+        };
         await GcpIngestion.testConnection(creds, transform);
       };
     };
@@ -712,23 +790,22 @@ actor {
     let now = Time.now();
 
     // AWS health
-    let awsHealth : Types.CredentialHealthStatus = switch (awsCredentials) {
-      case null { { provider = "AWS"; health = #Error("No credentials configured"); expiryNs = null } };
-      case (?_) {
-        switch (awsAuthError) {
-          case (?err) { { provider = "AWS"; health = #Error(err); expiryNs = null } };
-          case null {
-            switch (awsSessionCache) {
-              case null { { provider = "AWS"; health = #Authenticating; expiryNs = null } };
-              case (?cache) {
-                let remaining = cache.expiryNs - now;
-                if (remaining <= 0) {
-                  { provider = "AWS"; health = #Expired; expiryNs = ?cache.expiryNs };
-                } else if (remaining <= fiveMinNs) {
-                  { provider = "AWS"; health = #ExpiringSoon("Expires in less than 5 minutes"); expiryNs = ?cache.expiryNs };
-                } else {
-                  { provider = "AWS"; health = #Valid; expiryNs = ?cache.expiryNs };
-                };
+    let awsHealth : Types.CredentialHealthStatus = if (not ProviderCredentials.isConfigured(vaultState, #AWS)) {
+      { provider = "AWS"; health = #Error("No credentials configured"); expiryNs = null };
+    } else {
+      switch (awsAuthError) {
+        case (?err) { { provider = "AWS"; health = #Error(err); expiryNs = null } };
+        case null {
+          switch (awsSessionCache) {
+            case null { { provider = "AWS"; health = #Authenticating; expiryNs = null } };
+            case (?cache) {
+              let remaining = cache.expiryNs - now;
+              if (remaining <= 0) {
+                { provider = "AWS"; health = #Expired; expiryNs = ?cache.expiryNs };
+              } else if (remaining <= fiveMinNs) {
+                { provider = "AWS"; health = #ExpiringSoon("Expires in less than 5 minutes"); expiryNs = ?cache.expiryNs };
+              } else {
+                { provider = "AWS"; health = #Valid; expiryNs = ?cache.expiryNs };
               };
             };
           };
@@ -737,23 +814,22 @@ actor {
     };
 
     // Azure health
-    let azureHealth : Types.CredentialHealthStatus = switch (azureCredentials) {
-      case null { { provider = "Azure"; health = #Error("No credentials configured"); expiryNs = null } };
-      case (?_) {
-        switch (azureAuthError) {
-          case (?err) { { provider = "Azure"; health = #Error(err); expiryNs = null } };
-          case null {
-            switch (azureTokenCache) {
-              case null { { provider = "Azure"; health = #Authenticating; expiryNs = null } };
-              case (?cache) {
-                let remaining = cache.expiryNs - now;
-                if (remaining <= 0) {
-                  { provider = "Azure"; health = #Expired; expiryNs = ?cache.expiryNs };
-                } else if (remaining <= fiveMinNs) {
-                  { provider = "Azure"; health = #ExpiringSoon("Expires in less than 5 minutes"); expiryNs = ?cache.expiryNs };
-                } else {
-                  { provider = "Azure"; health = #Valid; expiryNs = ?cache.expiryNs };
-                };
+    let azureHealth : Types.CredentialHealthStatus = if (not ProviderCredentials.isConfigured(vaultState, #Azure)) {
+      { provider = "Azure"; health = #Error("No credentials configured"); expiryNs = null };
+    } else {
+      switch (azureAuthError) {
+        case (?err) { { provider = "Azure"; health = #Error(err); expiryNs = null } };
+        case null {
+          switch (azureTokenCache) {
+            case null { { provider = "Azure"; health = #Authenticating; expiryNs = null } };
+            case (?cache) {
+              let remaining = cache.expiryNs - now;
+              if (remaining <= 0) {
+                { provider = "Azure"; health = #Expired; expiryNs = ?cache.expiryNs };
+              } else if (remaining <= fiveMinNs) {
+                { provider = "Azure"; health = #ExpiringSoon("Expires in less than 5 minutes"); expiryNs = ?cache.expiryNs };
+              } else {
+                { provider = "Azure"; health = #Valid; expiryNs = ?cache.expiryNs };
               };
             };
           };
@@ -762,23 +838,22 @@ actor {
     };
 
     // GCP health
-    let gcpHealth : Types.CredentialHealthStatus = switch (gcpCredentials) {
-      case null { { provider = "GCP"; health = #Error("No credentials configured"); expiryNs = null } };
-      case (?_) {
-        switch (gcpAuthError) {
-          case (?err) { { provider = "GCP"; health = #Error(err); expiryNs = null } };
-          case null {
-            switch (gcpTokenCache) {
-              case null { { provider = "GCP"; health = #Authenticating; expiryNs = null } };
-              case (?cache) {
-                let remaining = cache.expiryNs - now;
-                if (remaining <= 0) {
-                  { provider = "GCP"; health = #Expired; expiryNs = ?cache.expiryNs };
-                } else if (remaining <= fiveMinNs) {
-                  { provider = "GCP"; health = #ExpiringSoon("Expires in less than 5 minutes"); expiryNs = ?cache.expiryNs };
-                } else {
-                  { provider = "GCP"; health = #Valid; expiryNs = ?cache.expiryNs };
-                };
+    let gcpHealth : Types.CredentialHealthStatus = if (not ProviderCredentials.isConfigured(vaultState, #GCP)) {
+      { provider = "GCP"; health = #Error("No credentials configured"); expiryNs = null };
+    } else {
+      switch (gcpAuthError) {
+        case (?err) { { provider = "GCP"; health = #Error(err); expiryNs = null } };
+        case null {
+          switch (gcpTokenCache) {
+            case null { { provider = "GCP"; health = #Authenticating; expiryNs = null } };
+            case (?cache) {
+              let remaining = cache.expiryNs - now;
+              if (remaining <= 0) {
+                { provider = "GCP"; health = #Expired; expiryNs = ?cache.expiryNs };
+              } else if (remaining <= fiveMinNs) {
+                { provider = "GCP"; health = #ExpiringSoon("Expires in less than 5 minutes"); expiryNs = ?cache.expiryNs };
+              } else {
+                { provider = "GCP"; health = #Valid; expiryNs = ?cache.expiryNs };
               };
             };
           };
@@ -803,9 +878,15 @@ actor {
     requireAuth(caller, "triggerPoll");
     switch (provider) {
       case (#Azure) {
-        switch (azureCredentials) {
+        switch (ProviderCredentials.resolveAzure(vaultState)) {
           case null {};
-          case (?creds) {
+          case (?c) {
+            let creds : Types.AzureCredentials = {
+              clientId = c.clientId;
+              clientSecret = c.clientSecret;
+              tenantId = c.tenantId;
+              subscriptionIds = c.subscriptionIds;
+            };
             azureRefreshInProgress := true;
             let azurePollResult = try {
               ?(await Azure.pollAzure(
@@ -823,18 +904,24 @@ actor {
                   azurePollingState := applyPauseLogic(#Azure, azurePollingState, errMsg);
                 } else {
                   azurePollingState := applySuccessLogic(#Azure, azurePollingState, Time.now(), newFindings.size());
-                  for (f in newFindings.vals()) { rawFindings.add(f) };
+                  for (f in newFindings.values()) { rawFindings.add(f) };
                   logAuthEvent("Azure", "TokenRefreshed", "Successful poll completed");
                 };
+                // Record a throttle or clear the backoff for this provider.
+                trackProviderThrottle(#Azure, azurePollingState);
               };
             };
           };
         };
       };
       case (#GCP) {
-        switch (gcpCredentials) {
+        switch (ProviderCredentials.resolveGcp(vaultState)) {
           case null {};
-          case (?creds) {
+          case (?c) {
+            let creds : Types.GcpCredentials = {
+              serviceAccountJson = c.serviceAccountJson;
+              projectIds = c.projectIds;
+            };
             let today = todayBucket();
             let currentState = if (today != findingsDayBucket) {
               GcpIngestion.makeState(
@@ -865,18 +952,25 @@ actor {
                   gcpPollingState := applyPauseLogic(#GCP, gcpPollingState, errMsg);
                 } else {
                   gcpPollingState := applySuccessLogic(#GCP, currentState, Time.now(), newFindings.size());
-                  for (f in newFindings.vals()) { rawFindings.add(f) };
+                  for (f in newFindings.values()) { rawFindings.add(f) };
                   logAuthEvent("GCP", "TokenRefreshed", "Successful poll completed");
                 };
+                // Record a throttle or clear the backoff for this provider.
+                trackProviderThrottle(#GCP, gcpPollingState);
               };
             };
           };
         };
       };
       case (#AWS) {
-        switch (awsCredentials) {
+        switch (ProviderCredentials.resolveAws(vaultState)) {
           case null {};
-          case (?creds) {
+          case (?c) {
+            let creds : Types.AwsCredentials = {
+              roleArn = c.roleArn;
+              externalId = c.externalId;
+              regions = c.regions;
+            };
             let today = todayBucket();
             let currentState = if (today != findingsDayBucket) {
               AwsIngestion.makeState(awsPollingState.interval);
@@ -898,9 +992,11 @@ actor {
                   awsPollingState := applyPauseLogic(#AWS, awsPollingState, errMsg);
                 } else {
                   awsPollingState := applySuccessLogic(#AWS, currentState, Time.now(), newFindings.size());
-                  for (f in newFindings.vals()) { rawFindings.add(f) };
+                  for (f in newFindings.values()) { rawFindings.add(f) };
                   logAuthEvent("AWS", "TokenRefreshed", "Successful STS session and poll completed");
                 };
+                // Record a throttle or clear the backoff for this provider.
+                trackProviderThrottle(#AWS, awsPollingState);
               };
             };
           };
@@ -950,12 +1046,12 @@ actor {
 
   // ── Guard ─────────────────────────────────────────────────────────────────
 
-  /// Returns true if credentials have been saved for at least one provider.
+  /// Returns true if a credential has been configured for at least one provider
+  /// in the vault.
   public query func hasAdminCredentials() : async Bool {
-    switch (awsCredentials, azureCredentials, gcpCredentials) {
-      case (null, null, null) false;
-      case _                  true;
-    };
+    ProviderCredentials.isConfigured(vaultState, #AWS) or
+    ProviderCredentials.isConfigured(vaultState, #Azure) or
+    ProviderCredentials.isConfigured(vaultState, #GCP);
   };
 
   // ── Private helpers (Modules 2-5) ─────────────────────────────────────────
@@ -989,7 +1085,7 @@ actor {
     let alertArr : [(Text, Types.NormalizedAlert)] = normalizedAlerts.toArray();
     let newIncidents = CorrelationEngine.runAllPatterns(correlatedIncidents, alertArr);
     var updated = correlatedIncidents;
-    for (inc in newIncidents.vals()) {
+    for (inc in newIncidents.values()) {
       // Idempotency: skip if an incident with same incidentId already exists
       let alreadyExists = updated.find(
         func((id, _)) { Text.equal(id, inc.incidentId) }
@@ -1006,6 +1102,198 @@ actor {
     correlatedIncidents := updated;
     lastCorrelationRunNs := Time.now();
     correlationRunning := false;
+  };
+
+  // ── Rate-limit tracking ───────────────────────────────────────────────────
+
+  /// Return true when a provider error message indicates the provider
+  /// throttled the request (HTTP 429 / rate-limit / too-many-requests).
+  func isThrottleError(message : Text) : Bool {
+    let lower = message.toLower();
+    lower.contains(#text "429") or
+    lower.contains(#text "throttl") or
+    lower.contains(#text "rate limit") or
+    lower.contains(#text "ratelimit") or
+    lower.contains(#text "too many requests") or
+    lower.contains(#text "too many request");
+  };
+
+  /// Record a throttling event for a provider when its poll result reports a
+  /// throttle, or clear the backoff after a successful poll. Called from the
+  /// AWS, Azure and GCP ingestion paths in triggerPoll.
+  func trackProviderThrottle(provider : Types.ProviderType, state : Types.ProviderPollingState) : () {
+    let nowNs = Time.now();
+    switch (state.lastError) {
+      case (?err) {
+        if (isThrottleError(err)) {
+          ignore RateLimitLib.recordThrottle(
+            rateLimitStates, throttleEvents, provider, null, null, err, nowNs);
+          let providerName = switch (provider) { case (#AWS) "AWS"; case (#Azure) "Azure"; case (#GCP) "GCP" };
+          addAuditEntry("system", "ProviderThrottled", providerName # " throttled: " # err, "");
+        };
+      };
+      case null {
+        // A clean poll clears any accumulated backoff.
+        RateLimitLib.resetBackoff(rateLimitStates, provider, nowNs);
+      };
+    };
+  };
+
+  // ── Notification delivery ─────────────────────────────────────────────────
+
+  /// Deliver notifications for a newly stored alert across every configured
+  /// channel. The notification router plans the deliveries (matching rules,
+  /// cooldown suppression, per-channel fan-out); this function performs the
+  /// actual delivery and records one notification log entry per attempt.
+  ///
+  /// Channels:
+  ///   - InApp  — recorded in the notification log only (surfaced in the UI).
+  ///   - Email  — one email per configured recipient via the email extension.
+  ///   - TeamsWebhook — one MessageCard POST to the customer's webhook URL.
+  ///
+  /// A failed send never throws; it is recorded as a #Failed log entry.
+  func deliverNotificationsForAlert(alert : Types.NormalizedAlert) : async () {
+    let routing = switch (NotificationsLib.getRouting(notificationRoutings, alert.customer)) {
+      case (?r) r;
+      case null {
+        // No routing configured for this customer: nothing to deliver.
+        return;
+      };
+    };
+    // The router works over plain lists; the actor stores keyed (id, record)
+    // tuples for OQL, so project the values out for planning.
+    let rules = List.fromArray<Types.AlertRule>(alertRules.toArray().map(func((_, r)) { r }));
+    let logs = List.fromArray<Types.NotificationLog>(notificationLogs.toArray().map(func((_, l)) { l }));
+    let nowNs = Time.now();
+    let plan = NotificationRouter.planDeliveries(rules, logs, routing, alert, nowNs);
+    for (delivery in plan.values()) {
+      let log = switch (delivery.channel) {
+        case (#InApp) {
+          NotificationRouter.makeLog(
+            alert.id, delivery.ruleId, #InApp, delivery.recipient, #Sent, alert.customer, nowNs);
+        };
+        case (#Email) {
+          let subject = "SecOps Alert: " # alert.title;
+          let body = "<h2>" # alert.title # "</h2><p>" # alert.description # "</p>";
+          let result = await EmailClient.sendServiceEmail("no-reply", [delivery.recipient], subject, body);
+          let status : Types.NotificationStatus = switch (result) {
+            case (#ok) #Sent;
+            case (#err(_)) #Failed;
+          };
+          NotificationRouter.makeLog(
+            alert.id, delivery.ruleId, #Email, delivery.recipient, status, alert.customer, Time.now());
+        };
+        case (#TeamsWebhook) {
+          let severityText = switch (alert.severity) {
+            case (#Critical) "Critical"; case (#High) "High"; case (#Medium) "Medium";
+            case (#Low) "Low"; case (#Unknown) "Unknown";
+          };
+          let payload = TeamsWebhook.buildPayload(alert.title, alert.description, severityText, alert.id);
+          let sent = try {
+            await TeamsWebhook.send(delivery.recipient, payload, transform);
+          } catch (_e) { false };
+          let status : Types.NotificationStatus = if (sent) #Sent else #Failed;
+          NotificationRouter.makeLog(
+            alert.id, delivery.ruleId, #TeamsWebhook, delivery.recipient, status, alert.customer, Time.now());
+        };
+      };
+      notificationLogs.add((log.id, log));
+    };
+  };
+
+  /// Run the unacknowledged-notification escalation check: find every
+  /// notification whose rule's escalation window has elapsed and that is still
+  /// unacknowledged, deliver the escalation, and record it in the notification
+  /// log. Returns the number of escalations delivered. Invoked from the public
+  /// `runEscalationCheck` endpoint and from the system heartbeat.
+  func runEscalationCheckInternal() : async Nat {
+    let rules = List.fromArray<Types.AlertRule>(alertRules.toArray().map(func((_, r)) { r }));
+    let logs = List.fromArray<Types.NotificationLog>(notificationLogs.toArray().map(func((_, l)) { l }));
+    let nowNs = Time.now();
+    let due = NotificationRouter.escalationsDue(rules, logs, nowNs);
+    var count = 0;
+    for ((rule, entry) in due.values()) {
+      await deliverEscalation(rule, entry);
+      count += 1;
+    };
+    count;
+  };
+
+  /// Deliver one escalation for an unacknowledged notification. The escalation
+  /// recipient is the rule's configured `escalationRecipient` when set,
+  /// otherwise the customer's routing recipients (email) or Teams webhook. The
+  /// escalation is delivered through the rule's configured channels and
+  /// recorded in the notification log. A failed send never throws; it is
+  /// recorded as a #Failed log entry.
+  func deliverEscalation(
+    rule : Types.AlertRule,
+    entry : Types.NotificationLog
+  ) : async () {
+    let routing = switch (NotificationsLib.getRouting(notificationRoutings, entry.customer)) {
+      case (?r) r;
+      case null {
+        // No routing configured for this customer: nothing to deliver.
+        return;
+      };
+    };
+    let nowNs = Time.now();
+    let escalationRecipient = rule.escalationRecipient;
+    for (channel in rule.channels.values()) {
+      let log = switch (channel) {
+        case (#InApp) {
+          NotificationRouter.makeLog(
+            entry.alertId, rule.id, #InApp, entry.customer, #Sent, entry.customer, nowNs);
+        };
+        case (#Email) {
+          let recipients = switch (escalationRecipient) {
+            case (?r) [r];
+            case null routing.emailRecipients;
+          };
+          if (recipients.size() == 0) {
+            NotificationRouter.makeLog(
+              entry.alertId, rule.id, #Email, "", #Failed, entry.customer, nowNs);
+          } else {
+            let subject = "SecOps Escalation: unacknowledged alert " # entry.alertId;
+            let body = "<h2>Escalation</h2><p>Alert " # entry.alertId #
+              " has not been acknowledged within the escalation window for rule " # rule.name # ".</p>";
+            let result = await EmailClient.sendServiceEmail("no-reply", recipients, subject, body);
+            let status : Types.NotificationStatus = switch (result) {
+              case (#ok) #Sent;
+              case (#err(_)) #Failed;
+            };
+            NotificationRouter.makeLog(
+              entry.alertId, rule.id, #Email, recipients.values().join(", "), status, entry.customer, Time.now());
+          };
+        };
+        case (#TeamsWebhook) {
+          let url = switch (escalationRecipient) {
+            case (?r) ?r;
+            case null routing.teamsWebhookUrl;
+          };
+          switch (url) {
+            case null {
+              NotificationRouter.makeLog(
+                entry.alertId, rule.id, #TeamsWebhook, "", #Failed, entry.customer, nowNs);
+            };
+            case (?webhookUrl) {
+              let payload = TeamsWebhook.buildPayload(
+                "Escalation: " # entry.alertId,
+                "Unacknowledged alert " # entry.alertId # " escalated by rule " # rule.name,
+                "High",
+                entry.alertId
+              );
+              let sent = try {
+                await TeamsWebhook.send(webhookUrl, payload, transform);
+              } catch (_e) { false };
+              let status : Types.NotificationStatus = if (sent) #Sent else #Failed;
+              NotificationRouter.makeLog(
+                entry.alertId, rule.id, #TeamsWebhook, webhookUrl, status, entry.customer, Time.now());
+            };
+          };
+        };
+      };
+      notificationLogs.add((log.id, log));
+    };
   };
 
   /// Process a batch of raw findings through the normalization engine.
@@ -1030,7 +1318,7 @@ actor {
     var updatedAssets = asArr;
     var newDirty : [Text] = dirtyAssets;
 
-    for (rf in batch.vals()) {
+    for (rf in batch.values()) {
       let newAlert = Norm.normalizeRawFinding(rf, ?#Poll);
       let (isNew, alertToStore) = Norm.deduplicateAlert(updatedAlerts, newAlert);
       if (isNew) {
@@ -1051,7 +1339,7 @@ actor {
         updatedAlerts := [(enrichedAlert.id, enrichedAlert)].concat(updatedAlerts);
         // Extract and deduplicate assets from new finding
         let extractedAssets = Assets.extractAssetsFromFinding(enrichedAlert);
-        for (a in extractedAssets.vals()) {
+        for (a in extractedAssets.values()) {
           let (_, assetToStore) = Assets.deduplicateAsset(updatedAssets, a);
           let existsAlready = updatedAssets.find(func((id, _)) { id == a.id }) != null;
           if (existsAlready) {
@@ -1081,6 +1369,8 @@ actor {
         });
         // Audit log entry
         addAuditEntry("system", "AlertIngested", "New alert: " # enrichedAlert.id, enrichedAlert.customer);
+        // Deliver notifications for the new alert (in-app, email, Teams).
+        await deliverNotificationsForAlert(enrichedAlert);
       } else {
         // Update existing entry
         updatedAlerts := updatedAlerts.map(
@@ -1124,11 +1414,16 @@ actor {
 
   // ── Module 2 — Normalized Alerts ─────────────────────────────────────────
 
-  /// Return normalized alerts matching the provided filter criteria.
-  /// Scoped to the providers the caller is assigned to.
+  /// Return a cursor-paginated page of normalized alerts matching the provided
+  /// filter criteria. Scoped to the providers the caller is assigned to.
+  ///
+  /// `filter.cursor` is `null` for the first page; pass the returned
+  /// `nextCursor` back verbatim to fetch the next page. `nextCursor` is `null`
+  /// when the page is the last one. The cursor is keyed on the alert's
+  /// (timestamp, id) sort key, so it stays stable across inserts.
   public shared query ({ caller }) func getNormalizedAlerts(
-    filter : { provider : ?Types.ProviderType; severity : ?Types.Severity; status : ?Types.AlertStatus; customer : Text; limit : Nat }
-  ) : async [Types.NormalizedAlert] {
+    filter : { provider : ?Types.ProviderType; severity : ?Types.Severity; status : ?Types.AlertStatus; customer : Text; limit : Nat; cursor : ?Types.Cursor }
+  ) : async Types.Page<Types.NormalizedAlert> {
     var results = normalizedAlerts.toArray();
     // Filter by provider
     switch (filter.provider) {
@@ -1185,11 +1480,48 @@ actor {
     results := results.filter(func((_, a)) {
       isProviderAssigned(caller, a.provider);
     });
-    // results are already newest-first (prepend on insert); apply limit
-    let totalLen = results.size();
-    let sliceEnd = if (filter.limit < totalLen) filter.limit else totalLen;
-    let sliced = results.sliceToArray(0, sliceEnd);
-    sliced.map(func((_, a)) { a });
+    // Order newest-first by (timestamp, id) so the cursor is stable across
+    // inserts. The stored list is already newest-first, but sorting makes the
+    // cursor contract independent of insertion order.
+    let ordered = results.sort(func((_, a), (_, b)) {
+      if (a.timestamp > b.timestamp) #less
+      else if (a.timestamp < b.timestamp) #greater
+      else Text.compare(a.id, b.id);
+    });
+    // Resume strictly after the cursor position when one is supplied. A
+    // malformed cursor is treated as the first page rather than trapping.
+    let afterCursor = switch (filter.cursor) {
+      case null ordered;
+      case (?raw) {
+        switch (AlertPagination.decodeCursor(raw)) {
+          case null ordered;
+          case (?position) {
+            ordered.filter(func((_, a)) {
+              AlertPagination.isAfterCursor(position, a.timestamp, a.id);
+            });
+          };
+        };
+      };
+    };
+    // Apply the page size. A limit of 0 means "no explicit cap"; use the
+    // default page size so a caller cannot request an unbounded page.
+    let effectiveLimit = if (filter.limit == 0) 100 else filter.limit;
+    let totalLen = afterCursor.size();
+    let sliceEnd = if (effectiveLimit < totalLen) effectiveLimit else totalLen;
+    let sliced = afterCursor.sliceToArray(0, sliceEnd);
+    // A next cursor is returned only when more rows remain beyond this page.
+    let nextCursor : ?Types.Cursor = if (sliceEnd < totalLen) {
+      switch (sliced.size()) {
+        case 0 null;
+        case _ {
+          let (_, last) = sliced[sliced.size() - 1];
+          ?AlertPagination.encodeCursor(last.timestamp, last.id);
+        };
+      };
+    } else {
+      null;
+    };
+    { items = sliced.map(func((_, a)) { a }); nextCursor };
   };
 
   /// Find a single alert by its ID.
@@ -1348,7 +1680,7 @@ actor {
       func(ctrl) {
         var passing_ = 0;
         var failing_ = 0;
-        for ((_, a) in alertsArr.vals()) {
+        for ((_, a) in alertsArr.values()) {
           // Only consider alerts mapped to this control
           let ctlIds = Compliance.mapAlertToControls(a, framework);
           let matches = ctlIds.find(func(cid) { Text.equal(cid, ctrl.controlId) }) != null;
@@ -1402,7 +1734,7 @@ actor {
       func(ctrl) {
         var passing_ = 0;
         var failing_ = 0;
-        for ((_, a) in alertsArr.vals()) {
+        for ((_, a) in alertsArr.values()) {
           let ctlIds = Compliance.mapAlertToControls(a, framework);
           let matches = ctlIds.find(func(cid) { Text.equal(cid, ctrl.controlId) }) != null;
           if (matches) {
@@ -1438,11 +1770,23 @@ actor {
 
   // ── Module 5 — Alert Rules & Notifications ────────────────────────────────
 
-  /// Return all alert rules for a given customer.
-  public query func getAlertRules(customer : Text) : async [Types.AlertRule] {
+  /// Return the caller's alert rules for a given customer, scoped to the
+  /// providers the caller is assigned to. Requires a signed-in caller and a
+  /// non-empty customer; an empty customer is never treated as match-all.
+  public shared query ({ caller }) func getAlertRules(customer : Text) : async [Types.AlertRule] {
+    requireAuth(caller, "getAlertRules");
+    if (customer == "") {
+      addAuditEntry(caller.toText(), "Unauthorized", "Rejected getAlertRules: empty customer", "");
+      return [];
+    };
     let arr = alertRules.toArray();
     let filtered = arr.filter(func((_, r)) {
-      customer == "" or Text.equal(r.customer, customer);
+      Text.equal(r.customer, customer) and (
+        switch (r.provider) {
+          case null true;
+          case (?p) isProviderAssigned(caller, p);
+        }
+      );
     });
     filtered.map(func((_, r)) { r });
   };
@@ -1483,16 +1827,20 @@ actor {
     removed;
   };
 
-  /// Return notification logs for a customer, sorted by timestamp descending.
-  public query func getNotificationLogs(
+  /// Return the caller's notification logs for a customer, sorted by timestamp
+  /// descending. Requires a signed-in caller and a non-empty customer; an empty
+  /// customer is never treated as match-all.
+  public shared query ({ caller }) func getNotificationLogs(
     filter : { customer : Text; limit : Nat }
   ) : async [Types.NotificationLog] {
-    var arr = notificationLogs.toArray();
-    if (filter.customer != "") {
-      arr := arr.filter(func((_, l)) {
-        Text.equal(l.customer, filter.customer);
-      });
+    requireAuth(caller, "getNotificationLogs");
+    if (filter.customer == "") {
+      addAuditEntry(caller.toText(), "Unauthorized", "Rejected getNotificationLogs: empty customer", "");
+      return [];
     };
+    let arr = notificationLogs.toArray().filter(func((_, l)) {
+      Text.equal(l.customer, filter.customer);
+    });
     // Already newest-first from List.push prepend
     let totalLen = arr.size();
     let sliceEnd = if (filter.limit < totalLen) filter.limit else totalLen;
@@ -1562,7 +1910,7 @@ actor {
     var hasMore = false;
 
     // Search normalized alerts
-    label alertSearch for ((_, a) in normalizedAlerts.toArray().vals()) {
+    label alertSearch for ((_, a) in normalizedAlerts.toArray().values()) {
       if (results.size() >= limit) { hasMore := true; break alertSearch };
       if (customer == "" or Text.equal(a.customer, customer)) {
         if (
@@ -1587,7 +1935,7 @@ actor {
     };
     // Search assets
     if (not hasMore) {
-      label assetSearch for ((_, a) in assets.toArray().vals()) {
+      label assetSearch for ((_, a) in assets.toArray().values()) {
         if (results.size() >= limit) { hasMore := true; break assetSearch };
         if (customer == "" or Text.equal(a.customer, customer)) {
           if (
@@ -1613,7 +1961,7 @@ actor {
     };
     // Search audit log
     if (not hasMore) {
-      label auditSearch for (entry in auditLog.toArray().vals()) {
+      label auditSearch for (entry in auditLog.toArray().values()) {
         if (results.size() >= limit) { hasMore := true; break auditSearch };
         if (customer == "" or Text.equal(entry.customer, customer)) {
           if (
@@ -1770,7 +2118,7 @@ actor {
     var totalWebhook = 0;
     var totalNormOk  = 0.0;
     var totalNorm    = 0.0;
-    for (s in stats.vals()) {
+    for (s in stats.values()) {
       totalWebhook += s.webhookEventsToday;
       let events = s.webhookEventsToday + s.pollEventsToday;
       if (events > 0) {
@@ -1833,7 +2181,7 @@ actor {
   ) : async Types.PlaybookResult {
     requireAuth(caller, "blockIp");
     // Require access to every provider the caller is acting on
-    for (prov in req.providers.vals()) {
+    for (prov in req.providers.values()) {
       requireProviderAccess(caller, prov, "blockIp");
     };
     if (req.ip.size() > 64 or req.ip.size() == 0) {
@@ -1842,13 +2190,13 @@ actor {
     var previewParts : [Text] = [];
     var errors : [Text] = [];
     let nowNs = Time.now();
-    for (prov in req.providers.vals()) {
+    for (prov in req.providers.values()) {
       switch (prov) {
         case (#AWS) {
           if (req.dryRun) {
             previewParts := previewParts.concat(["AWS: Would add deny rule for " # req.ip # " to VPC Network ACL via EC2 API"]);
           } else {
-            let region = switch (awsCredentials) {
+            let region = switch (ProviderCredentials.resolveAws(vaultState)) {
               case (?creds) { if (creds.regions.size() > 0) creds.regions[0] else "us-east-1" };
               case null "us-east-1";
             };
@@ -1880,7 +2228,7 @@ actor {
           if (req.dryRun) {
             previewParts := previewParts.concat(["Azure: Would add deny rule for " # req.ip # " to Network Security Group via Azure Network API"]);
           } else {
-            let subId = switch (azureCredentials) {
+            let subId = switch (ProviderCredentials.resolveAzure(vaultState)) {
               case (?creds) { if (creds.subscriptionIds.size() > 0) creds.subscriptionIds[0] else "" };
               case null "";
             };
@@ -1913,7 +2261,7 @@ actor {
           if (req.dryRun) {
             previewParts := previewParts.concat(["GCP: Would add deny firewall rule for " # req.ip # " via GCP Compute API"]);
           } else {
-            let projectId = switch (gcpCredentials) {
+            let projectId = switch (ProviderCredentials.resolveGcp(vaultState)) {
               case (?creds) { if (creds.projectIds.size() > 0) creds.projectIds[0] else "" };
               case null "";
             };
@@ -1941,8 +2289,8 @@ actor {
         };
       };
     };
-    let rawErr : ?Text = if (errors.size() > 0) ?(errors.vals().join("; ")) else null;
-    let preview : ?Text = if (previewParts.size() > 0) ?(previewParts.vals().join("\n")) else null;
+    let rawErr : ?Text = if (errors.size() > 0) ?(errors.values().join("; ")) else null;
+    let preview : ?Text = if (previewParts.size() > 0) ?(previewParts.values().join("\n")) else null;
     let success = errors.size() == 0;
     let msg = if (req.dryRun) "Dry-run preview generated"
               else if (success) "IP blocked on all requested providers"
@@ -1974,7 +2322,7 @@ actor {
     var success = false;
     switch (req.provider) {
       case (#AWS) {
-        let region = switch (awsCredentials) {
+        let region = switch (ProviderCredentials.resolveAws(vaultState)) {
           case (?creds) { if (creds.regions.size() > 0) creds.regions[0] else "us-east-1" };
           case null "us-east-1";
         };
@@ -2002,7 +2350,7 @@ actor {
         switch (token) {
           case null { rawErr := ?"No Azure token available" };
           case (?tok) {
-            let subId = switch (azureCredentials) {
+            let subId = switch (ProviderCredentials.resolveAzure(vaultState)) {
               case (?creds) { if (creds.subscriptionIds.size() > 0) creds.subscriptionIds[0] else "" };
               case null "";
             };
@@ -2026,7 +2374,7 @@ actor {
         switch (token) {
           case null { rawErr := ?"No GCP token available" };
           case (?tok) {
-            let projectId = switch (gcpCredentials) {
+            let projectId = switch (ProviderCredentials.resolveGcp(vaultState)) {
               case (?creds) { if (creds.projectIds.size() > 0) creds.projectIds[0] else "" };
               case null "";
             };
@@ -2123,7 +2471,7 @@ actor {
         switch (token) {
           case null { rawErr := ?"No GCP token available" };
           case (?tok) {
-            let projectId = switch (gcpCredentials) {
+            let projectId = switch (ProviderCredentials.resolveGcp(vaultState)) {
               case (?creds) { if (creds.projectIds.size() > 0) creds.projectIds[0] else "" };
               case null "";
             };
@@ -2219,7 +2567,7 @@ actor {
           if (containsOwner) { reportLines := reportLines.concat(["FLAGGED: Owner role binding found — review required"]) };
           if (containsEditor) { reportLines := reportLines.concat(["FLAGGED: Editor role binding found — review required"]) };
           if (not containsOwner and not containsEditor) { reportLines := reportLines.concat(["No high-privilege bindings detected"]) };
-          let report = reportLines.vals().join("\n");
+          let report = reportLines.values().join("\n");
           // Post report to most recent open correlated incident for customer
           let nowNs = Time.now();
           let openIncident = correlatedIncidents.find(
@@ -2417,7 +2765,7 @@ actor {
       case "SecurityPosture" {
         let alerts = normalizedAlerts.toArray();
         var rows : [Text] = ["alertId,severity,provider,title,resource,region,timestamp,status,owner,mitreTag"];
-        for ((_, a) in alerts.vals()) {
+        for ((_, a) in alerts.values()) {
           if ((req.customer == "" or Text.equal(a.customer, req.customer)) and
               (req.providerScope.size() == 0 or req.providerScope.find(func(p) {
                 let pText = switch (a.provider) { case (#AWS) "AWS"; case (#Azure) "Azure"; case (#GCP) "GCP" };
@@ -2433,37 +2781,37 @@ actor {
             rows := rows.concat([a.id # "," # sevText # "," # provText # "," # a.title # "," # resourceText # "," # regionText # "," # a.timestamp.toText() # "," # statusText # "," # ownerText # "," # mitreText]);
           };
         };
-        csvData := rows.vals().join("\n");
+        csvData := rows.values().join("\n");
       };
       case "ComplianceStatus" {
         var rows : [Text] = ["framework,controlId,controlTitle,status,remediation"];
         let frameworks : [Types.ComplianceFramework] = [#NISTCSF, #CISAws, #CISAzure, #CISGCP, #ISO27001, #SOC2];
-        for (fw in frameworks.vals()) {
+        for (fw in frameworks.values()) {
           let controls = Compliance.getFrameworkControls(fw, null);
-          for (c in controls.vals()) {
+          for (c in controls.values()) {
             let fwText  = switch (fw) { case (#NISTCSF) "NISTCSF"; case (#CISAws) "CISAws"; case (#CISAzure) "CISAzure"; case (#CISGCP) "CISGCP"; case (#ISO27001) "ISO27001"; case (#SOC2) "SOC2" };
             let stText  = switch (c.status) { case (#Passing) "Passing"; case (#Failing) "Failing"; case (#NoCoverage) "NoCoverage" };
             rows := rows.concat([fwText # "," # c.controlId # "," # c.title # "," # stText # "," # c.remediationGuidance]);
           };
         };
-        csvData := rows.vals().join("\n");
+        csvData := rows.values().join("\n");
       };
       case "IncidentSummary" {
         var rows : [Text] = ["incidentId,type,severity,status,detectedAt,resolvedAt,providers,timeDeltaMinutes,assignedOwner"];
-        for ((_, inc) in correlatedIncidents.vals()) {
+        for ((_, inc) in correlatedIncidents.values()) {
           if (req.customer == "" or Text.equal(inc.customer, req.customer)) {
             let sevText    = switch (inc.severity) { case (#Critical) "Critical"; case (#High) "High"; case (#Medium) "Medium"; case (#Low) "Low"; case (#Unknown) "Unknown" };
             let statusText = switch (inc.status) { case (#Open) "Open"; case (#Investigating) "Investigating"; case (#Resolved) "Resolved" };
-            let provText   = inc.sourceProviders.map(func(p) { switch p { case (#AWS) "AWS"; case (#Azure) "Azure"; case (#GCP) "GCP" } }).vals().join("+");
+            let provText   = inc.sourceProviders.map(func(p) { switch p { case (#AWS) "AWS"; case (#Azure) "Azure"; case (#GCP) "GCP" } }).values().join("+");
             let ownerText  = inc.assignedOwner.get("");
             rows := rows.concat([inc.incidentId # "," # inc.incidentType # "," # sevText # "," # statusText # "," # inc.detectedAt.toText() # ",," # provText # "," # inc.timeDeltaMinutes.toText() # "," # ownerText]);
           };
         };
-        csvData := rows.vals().join("\n");
+        csvData := rows.values().join("\n");
       };
       case "ThreatIntelSummary" {
         var rows : [Text] = ["alertId,title,sourceIp,abuseScore,country,mitreTag,knownMalicious"];
-        for ((_, a) in normalizedAlerts.toArray().vals()) {
+        for ((_, a) in normalizedAlerts.toArray().values()) {
           if ((req.customer == "" or Text.equal(a.customer, req.customer)) and a.enrichment.isSome()) {
             let enc = a.enrichment.get({ mitreDetail = null; ipReputation = null; domainRep = null; knownMaliciousIp = false; enrichedAt = null });
             let sourceIp   = ThreatIntel.extractIpFromAlert(a).get("");
@@ -2474,7 +2822,7 @@ actor {
             rows := rows.concat([a.id # "," # a.title # "," # sourceIp # "," # abuseScore # "," # country # "," # mitreText # "," # known]);
           };
         };
-        csvData := rows.vals().join("\n");
+        csvData := rows.values().join("\n");
       };
       case _ {
         return #err("Unknown reportType: " # req.reportType);
@@ -2742,6 +3090,60 @@ actor {
         .controllerOnly()
         .build(),
 
+      reportRuns.toEntityManual("reportRun", "ReportRun", "runId")
+        .sample({ runId = ""; reportType = #SecurityPosture; trigger = #OnDemand; periodStart = 0; periodEnd = 0; generatedAt = 0; outcome = #Succeeded; recipients = []; providerScope = []; deliveries = []; customer = "" })
+        .payload("runId", func r = r.runId)
+        .payload("reportType", func r = switch (r.reportType) { case (#SecurityPosture) "SecurityPosture"; case (#ComplianceStatus) "ComplianceStatus"; case (#IncidentSummary) "IncidentSummary"; case (#ThreatIntelSummary) "ThreatIntelSummary"; })
+        .payload("trigger", func r = switch (r.trigger) { case (#ScheduledWeekly) "ScheduledWeekly"; case (#ScheduledMonthly) "ScheduledMonthly"; case (#OnDemand) "OnDemand"; })
+        .payload("periodStart", func r = r.periodStart)
+        .payload("periodEnd", func r = r.periodEnd)
+        .payload("generatedAt", func r = r.generatedAt)
+        .payload("outcome", func r = switch (r.outcome) { case (#Succeeded) "Succeeded"; case (#Failed(_)) "Failed"; })
+        .payload("deliveryCount", func r = r.deliveries.size())
+        .payload("customer", func r = r.customer)
+        .controllerOnly()
+        .build(),
+
+      reportRecipientConfigs.toEntityManual("reportRecipientConfig", "ReportRecipientConfig", "reportType")
+        .sample({ reportType = #SecurityPosture; recipients = []; customer = "" })
+        .payload("reportType", func c = switch (c.reportType) { case (#SecurityPosture) "SecurityPosture"; case (#ComplianceStatus) "ComplianceStatus"; case (#IncidentSummary) "IncidentSummary"; case (#ThreatIntelSummary) "ThreatIntelSummary"; })
+        .payload("recipientCount", func c = c.recipients.size())
+        .payload("customer", func c = c.customer)
+        .controllerOnly()
+        .build(),
+
+      notificationRoutings.toEntityManual("notificationRouting", "NotificationRouting", "customer")
+        .sample({ customer = ""; teamsWebhookUrl = null; emailRecipients = []; cooldownMinutes = 0; escalationMinutes = null })
+        .payload("customer", func r = r.customer)
+        .payload("hasTeamsWebhook", func r = r.teamsWebhookUrl != null)
+        .payload("emailRecipientCount", func r = r.emailRecipients.size())
+        .payload("cooldownMinutes", func r = r.cooldownMinutes)
+        .payload("escalationMinutes", func r = r.escalationMinutes.get(0))
+        .controllerOnly()
+        .build(),
+
+      rateLimitStates.toEntityManual("rateLimitState", "RateLimitState", "provider")
+        .sample({ provider = #AWS; backoffSeconds = 0; consecutiveThrottles = 0; nextAttemptAt = null; lastThrottledAt = null; lastResetAt = null })
+        .payload("provider", func s = switch (s.provider) { case (#AWS) "AWS"; case (#Azure) "Azure"; case (#GCP) "GCP"; })
+        .payload("backoffSeconds", func s = s.backoffSeconds)
+        .payload("consecutiveThrottles", func s = s.consecutiveThrottles)
+        .payload("nextAttemptAt", func s = s.nextAttemptAt.get(0))
+        .payload("lastThrottledAt", func s = s.lastThrottledAt.get(0))
+        .payload("lastResetAt", func s = s.lastResetAt.get(0))
+        .controllerOnly()
+        .build(),
+
+      throttleEvents.toEntityManual("throttleEvent", "ThrottleEvent", "id")
+        .sample({ id = ""; provider = #AWS; timestamp = 0; retryAfterSec = null; statusCode = null; message = "" })
+        .payload("id", func e = e.id)
+        .payload("provider", func e = switch (e.provider) { case (#AWS) "AWS"; case (#Azure) "Azure"; case (#GCP) "GCP"; })
+        .payload("timestamp", func e = e.timestamp)
+        .payload("retryAfterSec", func e = e.retryAfterSec.get(0))
+        .payload("statusCode", func e = e.statusCode.get(0))
+        .payload("message", func e = e.message)
+        .controllerOnly()
+        .build(),
+
       [awsPollingState, azurePollingState, gcpPollingState].toEntityManual<Types.ProviderPollingState>("providerPollingState", "ProviderPollingState", "provider")
         .sample({ provider = #AWS; status = #Active; lastSuccessfulPoll = null; lastPollAttempt = null; findingsToday = 0; consecutiveFailures = 0; lastError = null; interval = #FiveMin })
         .payload("provider", func s = switch (s.provider) { case (#AWS) "AWS"; case (#Azure) "Azure"; case (#GCP) "GCP"; })
@@ -2795,12 +3197,35 @@ actor {
         .payload("maskedValue", func (_) = "••••••••")
         .controllerOnly()
         .build(),
+
+      // Provider credential status — exposes ONLY masked structured fields
+      // (configured flag, field names, masked values, updatedAt). The plaintext
+      // credential values are never exposed, consistent with the app's security
+      // posture that secrets are never surfaced.
+      [#AWS, #Azure, #GCP].toEntityManual<Types.ProviderType>("providerCredential", "ProviderCredential", "provider")
+        .sample(#AWS)
+        .payload("provider", func p = switch (p) { case (#AWS) "AWS"; case (#Azure) "Azure"; case (#GCP) "GCP"; })
+        .payload("configured", func p = ProviderCredentials.isConfigured(vaultState, p))
+        .payload("fields", func p = ProviderCredentials.getStatus(vaultState, p).fields.map(
+          func(f) { f.name # "=" # f.maskedValue }
+        ).values().join("; "))
+        .payload("updatedAt", func p = ProviderCredentials.getStatus(vaultState, p).updatedAt.get(0))
+        .controllerOnly()
+        .build(),
     ];
   });
 
   include PerProviderAccessControlApi(providerAssignments, requireAuth);
 
   include VaultApi(vaultState, requireAuth, requireProviderAccess, isOwner, addAuditEntry);
+
+  include ProviderCredentialsApi(vaultState, requireAuth, requireProviderAccess, isOwner, addAuditEntry, transform);
+
+  include ReportingApi(reportRuns, reportRecipientConfigs, requireAuth, addAuditEntry);
+
+  include NotificationsApi(notificationRoutings, requireAuth, addAuditEntry, runEscalationCheckInternal);
+
+  include RateLimitApi(rateLimitStates, throttleEvents, providerAssignments, requireAuth, requireProviderAccess, isOwner);
 
   include ApiDocMixin();
 

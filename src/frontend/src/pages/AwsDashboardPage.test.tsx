@@ -68,6 +68,27 @@ vi.mock("../hooks/use-backend", () => ({
   useBlockIp: (...args: unknown[]) => useBlockIpMock(...args),
   useIsolateResource: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useRevokeIamCredentials: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useProviderCredentialStatus: (provider: string) => ({
+    data: { provider, configured: false, fields: [] },
+    isLoading: false,
+  }),
+  useSaveProviderCredential: () => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
+  }),
+  useUpdateProviderCredential: () => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
+  }),
+  useClearProviderCredential: () => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
+  }),
+  useTestProviderConnection: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+    data: undefined,
+  }),
   usePipelineHealth: () => ({ data: [] }),
   useGlobalSearch: () => ({ data: { results: [] }, isLoading: false }),
 }));

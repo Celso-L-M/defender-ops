@@ -7,52 +7,89 @@ export interface None {
     __kind__: "None";
 }
 export type Option<T> = Some<T> | None;
-export interface IpReputation {
-    isp: string;
-    country: string;
-    lastReported: string;
-    totalReports: bigint;
-    abuseScore: bigint;
+export interface AlertEnrichment {
+    domainRep?: DomainRep;
+    knownMaliciousIp: boolean;
+    ipReputation?: IpReputation;
+    enrichedAt?: string;
+    mitreDetail?: MitreDetail;
 }
-export interface SearchResult {
+export interface AlertRule {
     id: string;
-    title: string;
+    region?: string;
+    escalationRecipient?: string;
+    severityThreshold?: RuleSeverityThreshold;
     provider?: ProviderType;
     customer: string;
-    description: string;
+    assetId?: string;
+    name: string;
+    escalationMinutes?: bigint;
+    channels: Array<NotificationChannel>;
+    cooldownMinutes: bigint;
+    enabled: boolean;
+    findingType?: string;
+}
+export interface Asset {
+    id: string;
+    region: string;
+    provider: ProviderType;
+    accountId: string;
+    customer: string;
+    name: string;
+    tags: Array<[string, string]>;
+    assetType: AssetType;
+    lastSeen: bigint;
+    riskScore: bigint;
+    openFindings: bigint;
+}
+export interface AuditLogEntry {
+    id: string;
+    action: string;
+    customer: string;
+    actorId: string;
     timestamp: bigint;
-    sourceModule: string;
-    severity?: Severity;
+    details: string;
 }
-export type Result_2 = {
-    __kind__: "ok";
-    ok: {
-        csvData: string;
-        reportId: string;
-    };
+export interface AwsCredentialInput {
+    externalId?: string;
+    roleArn: string;
+    regions: Array<string>;
+}
+export interface AzureCredentialInput {
+    clientId: string;
+    subscriptionIds: Array<string>;
+    tenantId: string;
+    clientSecret: string;
+}
+export interface Cell {
+    value: Value;
+    name: string;
+}
+export interface ComplianceControl {
+    status: ControlStatus;
+    title: string;
+    provider?: ProviderType;
+    framework: ComplianceFramework;
+    failingFindings: bigint;
+    description: string;
+    controlId: string;
+    remediationGuidance: string;
+    passingFindings: bigint;
+}
+export interface ComplianceTrendEntry {
+    passingControls: bigint;
+    framework: ComplianceFramework;
+    totalControls: bigint;
+    score: bigint;
+    weekTimestamp: bigint;
+}
+export type ConnectionTestResult = {
+    __kind__: "Success";
+    Success: string;
 } | {
-    __kind__: "err";
-    err: string;
+    __kind__: "Failure";
+    Failure: string;
 };
-export interface TransformationOutput {
-    status: bigint;
-    body: Uint8Array;
-    headers: Array<HttpHeader>;
-}
-export interface UserAssignmentView {
-    principal: string;
-    providers: Array<ProviderType>;
-}
-export interface HttpRequestResult {
-    status: bigint;
-    body: Uint8Array;
-    headers: Array<HttpHeader>;
-}
-export type VaultSecretName = string;
-export interface Result__1 {
-    hasMore: boolean;
-    rows: Array<Array<Cell>>;
-}
 export interface CorrelatedIncident {
     status: IncidentStatus;
     incidentId: string;
@@ -69,114 +106,29 @@ export interface CorrelatedIncident {
     correlationWindowMinutes: bigint;
     incidentType: string;
 }
-export type Result_1 = {
-    __kind__: "ok";
-    ok: string;
+export interface CorrelationStats {
+    totalAllTime: bigint;
+    byType: Array<[string, bigint]>;
+    totalToday: bigint;
+    totalThisWeek: bigint;
+}
+export type CredentialError = {
+    __kind__: "InvalidCredential";
+    InvalidCredential: string;
 } | {
-    __kind__: "err";
-    err: VaultError;
-};
-export interface NotificationLog {
-    id: string;
-    status: NotificationStatus;
-    acknowledgedAt?: bigint;
-    customer: string;
-    ruleId: string;
-    recipient: string;
-    alertId: string;
-    acknowledged: boolean;
-    timestamp: bigint;
-    channel: NotificationChannel;
-}
-export interface TimelineEvent {
-    id: string;
-    title: string;
-    provider?: ProviderType;
-    customer: string;
-    description: string;
-    timestamp: bigint;
-    severity?: Severity;
-    eventType: string;
-}
-export interface GeneratedReport {
-    csvData?: string;
-    customer: string;
-    providerScope: Array<string>;
-    generatedAt: string;
-    generatedBy: string;
-    dateRangeStart: string;
-    dateRangeEnd: string;
-    reportType: string;
-    reportId: string;
-    format: string;
-}
-export interface MitreDetail {
-    techniqueName: string;
-    tacticName: string;
-    mitigations: string;
-    description: string;
-}
-export interface TransformationInput {
-    context: Uint8Array;
-    response: HttpRequestResult;
-}
-export type ConnectionTestResult = {
-    __kind__: "Success";
-    Success: string;
+    __kind__: "NotFound";
+    NotFound: null;
 } | {
-    __kind__: "Failure";
-    Failure: string;
+    __kind__: "NotAuthorized";
+    NotAuthorized: null;
+} | {
+    __kind__: "VaultError";
+    VaultError: string;
 };
-export interface ComplianceControl {
-    status: ControlStatus;
-    title: string;
-    provider?: ProviderType;
-    framework: ComplianceFramework;
-    failingFindings: bigint;
-    description: string;
-    controlId: string;
-    remediationGuidance: string;
-    passingFindings: bigint;
-}
-export interface Cell {
-    value: Value;
+export interface CredentialFieldView {
     name: string;
-}
-export type Value = {
-    __kind__: "int";
-    int: bigint;
-} | {
-    __kind__: "nat";
-    nat: bigint;
-} | {
-    __kind__: "float";
-    float: number;
-} | {
-    __kind__: "bool";
-    bool: boolean;
-} | {
-    __kind__: "null";
-    null: null;
-} | {
-    __kind__: "text";
-    text: string;
-};
-export interface ProviderPollingState {
-    status: PollingStatus;
-    provider: ProviderType;
-    interval: PollingInterval;
-    lastPollAttempt?: bigint;
-    lastSuccessfulPoll?: bigint;
-    findingsToday: bigint;
-    lastError?: string;
-    consecutiveFailures: bigint;
-}
-export interface PlaybookResult {
-    rawApiError?: string;
-    dryRunPreview?: string;
-    provider?: ProviderType;
-    message: string;
-    success: boolean;
+    maskedValue: string;
+    isSet: boolean;
 }
 export type CredentialHealth = {
     __kind__: "Error";
@@ -194,59 +146,66 @@ export type CredentialHealth = {
     __kind__: "Expired";
     Expired: null;
 };
+export interface CredentialHealthStatus {
+    provider: string;
+    expiryNs?: bigint;
+    health: CredentialHealth;
+}
+export type Cursor = string;
+export type CustomerId = string;
 export interface DomainRep {
     suspiciousVotes: bigint;
     maliciousVotes: bigint;
     cleanVotes: bigint;
     lastAnalysisDate: string;
 }
-export interface ComplianceTrendEntry {
-    passingControls: bigint;
-    framework: ComplianceFramework;
-    totalControls: bigint;
-    score: bigint;
-    weekTimestamp: bigint;
+export interface GcpCredentialInput {
+    serviceAccountJson: string;
+    projectIds: Array<string>;
 }
-export interface Asset {
-    id: string;
-    region: string;
-    provider: ProviderType;
-    accountId: string;
+export interface GeneratedReport {
+    csvData?: string;
     customer: string;
+    providerScope: Array<string>;
+    generatedAt: string;
+    generatedBy: string;
+    dateRangeStart: string;
+    dateRangeEnd: string;
+    reportType: string;
+    reportId: string;
+    format: string;
+}
+export interface HttpHeader {
+    value: string;
     name: string;
-    tags: Array<[string, string]>;
-    assetType: AssetType;
-    lastSeen: bigint;
-    riskScore: bigint;
-    openFindings: bigint;
 }
-export interface AlertRule {
-    id: string;
-    region?: string;
-    escalationRecipient?: string;
-    severityThreshold?: RuleSeverityThreshold;
-    provider?: ProviderType;
-    customer: string;
-    assetId?: string;
-    name: string;
-    escalationMinutes?: bigint;
-    channels: Array<NotificationChannel>;
-    cooldownMinutes: bigint;
-    enabled: boolean;
-    findingType?: string;
-}
-export interface AuditLogEntry {
-    id: string;
-    action: string;
-    customer: string;
-    actorId: string;
-    timestamp: bigint;
-    details: string;
+export interface HttpRequestResult {
+    status: bigint;
+    body: Uint8Array;
+    headers: Array<HttpHeader>;
 }
 export interface IngestionStats {
     providerStates: Array<ProviderPollingState>;
     activeProviders: bigint;
     totalFindingsToday: bigint;
+}
+export interface IpReputation {
+    isp: string;
+    country: string;
+    lastReported: string;
+    totalReports: bigint;
+    abuseScore: bigint;
+}
+export interface MitreDetail {
+    techniqueName: string;
+    tacticName: string;
+    mitigations: string;
+    description: string;
+}
+export interface MitreTag {
+    techniqueId: string;
+    technique: string;
+    tactic: string;
 }
 export interface NormalizedAlert {
     id: string;
@@ -270,6 +229,83 @@ export interface NormalizedAlert {
     severity: Severity;
     enrichment?: AlertEnrichment;
 }
+export type NotificationError = {
+    __kind__: "InvalidWebhookUrl";
+    InvalidWebhookUrl: string;
+} | {
+    __kind__: "NotFound";
+    NotFound: null;
+} | {
+    __kind__: "NotAuthorized";
+    NotAuthorized: null;
+} | {
+    __kind__: "InvalidRule";
+    InvalidRule: string;
+};
+export interface NotificationLog {
+    id: string;
+    status: NotificationStatus;
+    acknowledgedAt?: bigint;
+    customer: string;
+    ruleId: string;
+    recipient: string;
+    alertId: string;
+    acknowledged: boolean;
+    timestamp: bigint;
+    channel: NotificationChannel;
+}
+export interface NotificationRouting {
+    customer: CustomerId;
+    escalationMinutes?: bigint;
+    cooldownMinutes: bigint;
+    teamsWebhookUrl?: string;
+    emailRecipients: Array<string>;
+}
+export interface Page {
+    items: Array<NormalizedAlert>;
+    nextCursor?: Cursor;
+}
+export interface PlaybookResult {
+    rawApiError?: string;
+    dryRunPreview?: string;
+    provider?: ProviderType;
+    message: string;
+    success: boolean;
+}
+export type ProviderCredentialInput = {
+    __kind__: "AWS";
+    AWS: AwsCredentialInput;
+} | {
+    __kind__: "GCP";
+    GCP: GcpCredentialInput;
+} | {
+    __kind__: "Azure";
+    Azure: AzureCredentialInput;
+};
+export interface ProviderCredentialStatus {
+    provider: ProviderType;
+    fields: Array<CredentialFieldView>;
+    updatedAt?: bigint;
+    configured: boolean;
+}
+export interface ProviderPollingState {
+    status: PollingStatus;
+    provider: ProviderType;
+    interval: PollingInterval;
+    lastPollAttempt?: bigint;
+    lastSuccessfulPoll?: bigint;
+    findingsToday: bigint;
+    lastError?: string;
+    consecutiveFailures: bigint;
+}
+export interface RateLimitBackoffState {
+    lastResetAt?: Timestamp;
+    provider: ProviderType;
+    nextAttemptAt?: Timestamp;
+    lastThrottledAt?: Timestamp;
+    backoffSeconds: bigint;
+    consecutiveThrottles: bigint;
+}
 export interface RawFinding {
     id: string;
     region?: string;
@@ -282,21 +318,50 @@ export interface RawFinding {
     timestamp: bigint;
     severity: Severity;
 }
-export interface MitreTag {
-    techniqueId: string;
-    technique: string;
-    tactic: string;
+export interface ReportDeliveryOutcome {
+    recipient: string;
+    sentAt?: Timestamp;
+    error?: string;
+    success: boolean;
 }
-export interface HttpHeader {
-    value: string;
-    name: string;
+export interface ReportRecipientConfig {
+    customer: CustomerId;
+    reportType: ReportType;
+    recipients: Array<string>;
 }
-export interface CorrelationStats {
-    totalAllTime: bigint;
-    byType: Array<[string, bigint]>;
-    totalToday: bigint;
-    totalThisWeek: bigint;
+export interface ReportRun {
+    trigger: ReportTrigger;
+    deliveries: Array<ReportDeliveryOutcome>;
+    customer: CustomerId;
+    providerScope: Array<ProviderType>;
+    generatedAt: Timestamp;
+    reportType: ReportType;
+    periodEnd: Timestamp;
+    recipients: Array<string>;
+    periodStart: Timestamp;
+    outcome: ReportRunOutcome;
+    runId: string;
 }
+export type ReportRunOutcome = {
+    __kind__: "Failed";
+    Failed: string;
+} | {
+    __kind__: "Succeeded";
+    Succeeded: null;
+};
+export type ReportingError = {
+    __kind__: "NotFound";
+    NotFound: null;
+} | {
+    __kind__: "NotAuthorized";
+    NotAuthorized: null;
+} | {
+    __kind__: "InvalidPeriod";
+    InvalidPeriod: null;
+} | {
+    __kind__: "InvalidRecipient";
+    InvalidRecipient: string;
+};
 export type Result = {
     __kind__: "ok";
     ok: null;
@@ -304,20 +369,130 @@ export type Result = {
     __kind__: "err";
     err: VaultError;
 };
+export type Result_1 = {
+    __kind__: "ok";
+    ok: null;
+} | {
+    __kind__: "err";
+    err: CredentialError;
+};
+export type Result_2 = {
+    __kind__: "ok";
+    ok: null;
+} | {
+    __kind__: "err";
+    err: ReportingError;
+};
 export type Result_3 = {
+    __kind__: "ok";
+    ok: null;
+} | {
+    __kind__: "err";
+    err: NotificationError;
+};
+export type Result_4 = {
+    __kind__: "ok";
+    ok: ReportRun;
+} | {
+    __kind__: "err";
+    err: ReportingError;
+};
+export type Result_5 = {
+    __kind__: "ok";
+    ok: string;
+} | {
+    __kind__: "err";
+    err: VaultError;
+};
+export type Result_6 = {
+    __kind__: "ok";
+    ok: null;
+} | {
+    __kind__: "err";
+    err: RateLimitError;
+};
+export type Result_7 = {
+    __kind__: "ok";
+    ok: {
+        csvData: string;
+        reportId: string;
+    };
+} | {
+    __kind__: "err";
+    err: string;
+};
+export type Result_8 = {
     __kind__: "ok";
     ok: string;
 } | {
     __kind__: "err";
     err: string;
 };
-export interface AlertEnrichment {
-    domainRep?: DomainRep;
-    knownMaliciousIp: boolean;
-    ipReputation?: IpReputation;
-    enrichedAt?: string;
-    mitreDetail?: MitreDetail;
+export interface Result__1 {
+    hasMore: boolean;
+    rows: Array<Array<Cell>>;
 }
+export interface SearchResult {
+    id: string;
+    title: string;
+    provider?: ProviderType;
+    customer: string;
+    description: string;
+    timestamp: bigint;
+    sourceModule: string;
+    severity?: Severity;
+}
+export interface ThrottleEvent {
+    id: string;
+    provider: ProviderType;
+    message: string;
+    timestamp: Timestamp;
+    retryAfterSec?: bigint;
+    statusCode?: bigint;
+}
+export interface TimelineEvent {
+    id: string;
+    title: string;
+    provider?: ProviderType;
+    customer: string;
+    description: string;
+    timestamp: bigint;
+    severity?: Severity;
+    eventType: string;
+}
+export type Timestamp = bigint;
+export interface TransformationInput {
+    context: Uint8Array;
+    response: HttpRequestResult;
+}
+export interface TransformationOutput {
+    status: bigint;
+    body: Uint8Array;
+    headers: Array<HttpHeader>;
+}
+export interface UserAssignmentView {
+    principal: string;
+    providers: Array<ProviderType>;
+}
+export type Value = {
+    __kind__: "int";
+    int: bigint;
+} | {
+    __kind__: "nat";
+    nat: bigint;
+} | {
+    __kind__: "float";
+    float: number;
+} | {
+    __kind__: "bool";
+    bool: boolean;
+} | {
+    __kind__: "null";
+    null: null;
+} | {
+    __kind__: "text";
+    text: string;
+};
 export interface VaultEntryView {
     provider: ProviderType;
     name: VaultSecretName;
@@ -325,11 +500,7 @@ export interface VaultEntryView {
     updatedAt: bigint;
     maskedValue: string;
 }
-export interface CredentialHealthStatus {
-    provider: string;
-    expiryNs?: bigint;
-    health: CredentialHealth;
-}
+export type VaultSecretName = string;
 export enum AlertStatus {
     Open = "Open",
     InProgress = "InProgress",
@@ -383,7 +554,7 @@ export enum PollingInterval {
     FiveMin = "FiveMin"
 }
 export enum PollingStatus {
-    Error_ = "Error",
+    Error = "Error",
     AuthPaused = "AuthPaused",
     Inactive = "Inactive",
     Active = "Active"
@@ -392,6 +563,21 @@ export enum ProviderType {
     AWS = "AWS",
     GCP = "GCP",
     Azure = "Azure"
+}
+export enum RateLimitError {
+    UnknownProvider = "UnknownProvider",
+    NotAuthorized = "NotAuthorized"
+}
+export enum ReportTrigger {
+    ScheduledWeekly = "ScheduledWeekly",
+    OnDemand = "OnDemand",
+    ScheduledMonthly = "ScheduledMonthly"
+}
+export enum ReportType {
+    IncidentSummary = "IncidentSummary",
+    SecurityPosture = "SecurityPosture",
+    ComplianceStatus = "ComplianceStatus",
+    ThreatIntelSummary = "ThreatIntelSummary"
 }
 export enum RuleSeverityThreshold {
     All = "All",
@@ -440,6 +626,11 @@ export interface backendInterface {
         dryRun: boolean;
     }): Promise<PlaybookResult>;
     /**
+     * / Clear a provider's typed credential from its isolated vault secret.
+     * / Returns `#NotFound` when no credential is stored.
+     */
+    clearProviderCredential(provider: ProviderType): Promise<Result_1>;
+    /**
      * / Delete an alert rule by ID.
      */
     deleteAlertRule(id: string): Promise<boolean>;
@@ -463,7 +654,7 @@ export interface backendInterface {
     /**
      * / Trigger enrichment for a specific alert on demand.
      */
-    enrichAlertPublic(alertId: string, customer: string): Promise<Result_3>;
+    enrichAlertPublic(alertId: string, customer: string): Promise<Result_8>;
     /**
      * / Escalate an alert to a full correlated incident and create a Halo ticket.
      */
@@ -485,6 +676,15 @@ export interface backendInterface {
      */
     exportCompliancePdf(framework: ComplianceFramework): Promise<Uint8Array>;
     /**
+     * / Export a generated report as branded PDF bytes. The caller supplies the
+     * / report type, an explicit period, the customer and the provider scope; the
+     * / endpoint renders the same executive summary used for email delivery plus
+     * / a chart of the run's per-recipient delivery outcomes, and returns the
+     * / PDF-1.4 bytes. This is a query so the frontend can download the document
+     * / without a state change.
+     */
+    exportReportPdf(reportType: ReportType, periodStart: Timestamp, periodEnd: Timestamp, customer: CustomerId, providerScope: Array<ProviderType>): Promise<Uint8Array>;
+    /**
      * / Force a GCP IAM review for a project, flagging over-privileged bindings.
      */
     forceGcpIamReview(req: {
@@ -501,14 +701,16 @@ export interface backendInterface {
         dateRangeStart: string;
         dateRangeEnd: string;
         reportType: string;
-    }): Promise<Result_2>;
+    }): Promise<Result_7>;
     /**
      * / Find a single alert by its ID.
      * / Requires the caller to be assigned to the alert's provider.
      */
     getAlertById(id: string): Promise<NormalizedAlert | null>;
     /**
-     * / Return all alert rules for a given customer.
+     * / Return the caller's alert rules for a given customer, scoped to the
+     * / providers the caller is assigned to. Requires a signed-in caller and a
+     * / non-empty customer; an empty customer is never treated as match-all.
      */
     getAlertRules(customer: string): Promise<Array<AlertRule>>;
     /**
@@ -614,23 +816,35 @@ export interface backendInterface {
      */
     getMyProviders(): Promise<Array<ProviderType>>;
     /**
-     * / Return normalized alerts matching the provided filter criteria.
-     * / Scoped to the providers the caller is assigned to.
+     * / Return a cursor-paginated page of normalized alerts matching the provided
+     * / filter criteria. Scoped to the providers the caller is assigned to.
+     * /
+     * / `filter.cursor` is `null` for the first page; pass the returned
+     * / `nextCursor` back verbatim to fetch the next page. `nextCursor` is `null`
+     * / when the page is the last one. The cursor is keyed on the alert's
+     * / (timestamp, id) sort key, so it stays stable across inserts.
      */
     getNormalizedAlerts(filter: {
         status?: AlertStatus;
         provider?: ProviderType;
         customer: string;
+        cursor?: Cursor;
         limit: bigint;
         severity?: Severity;
-    }): Promise<Array<NormalizedAlert>>;
+    }): Promise<Page>;
     /**
-     * / Return notification logs for a customer, sorted by timestamp descending.
+     * / Return the caller's notification logs for a customer, sorted by timestamp
+     * / descending. Requires a signed-in caller and a non-empty customer; an empty
+     * / customer is never treated as match-all.
      */
     getNotificationLogs(filter: {
         customer: string;
         limit: bigint;
     }): Promise<Array<NotificationLog>>;
+    /**
+     * / Return the notification routing for a customer, if configured.
+     */
+    getNotificationRouting(customer: CustomerId): Promise<NotificationRouting | null>;
     /**
      * / Return per-provider pipeline health stats for the dashboard.
      * / provider field is returned as Text to avoid Candid variant decoding issues on the frontend.
@@ -645,10 +859,20 @@ export interface backendInterface {
         avgLatencyMs: number;
     }>>;
     /**
+     * / Read a provider's typed credential status (configured/not configured and
+     * / masked structured fields only). Never returns plaintext.
+     */
+    getProviderCredentialStatus(provider: ProviderType): Promise<ProviderCredentialStatus>;
+    /**
      * / Return per-provider polling state (status, last poll time, error info).
      * / Scoped to the providers the caller is assigned to.
      */
     getProviderStates(): Promise<Array<ProviderPollingState>>;
+    /**
+     * / Return the rate-limit backoff state for the providers the caller is
+     * / assigned to. The canister controller (owner) sees every tracked provider.
+     */
+    getRateLimitStates(): Promise<Array<RateLimitBackoffState>>;
     /**
      * / Return paginated raw findings for a given provider.
      * / limit: max items to return (default 100, max 500). offset: starting index.
@@ -671,9 +895,29 @@ export interface backendInterface {
         recipients: Array<string>;
     }>>;
     /**
+     * / Return the recipient configuration for a report type and customer.
+     */
+    getReportRecipients(reportType: ReportType, customer: CustomerId): Promise<ReportRecipientConfig | null>;
+    /**
+     * / Find a single report run by its ID, scoped to the caller's customer.
+     */
+    getReportRun(runId: string, customer: CustomerId): Promise<ReportRun | null>;
+    /**
+     * / Return report runs for a customer, newest first, capped at `limit`.
+     */
+    getReportRuns(customer: CustomerId, limit: bigint): Promise<Array<ReportRun>>;
+    /**
      * / Return the list of generated reports for a customer (without CSV data).
      */
     getReports(customer: string): Promise<Array<GeneratedReport>>;
+    /**
+     * / Return recent throttling events, optionally filtered to one provider,
+     * / newest first, capped at `limit`. An explicit provider filter is
+     * / access-checked against the caller's provider assignment. Without an
+     * / explicit filter the result is scoped to the caller's assigned providers;
+     * / the canister controller (owner) sees every provider.
+     */
+    getThrottleEvents(provider: ProviderType | null, limit: bigint): Promise<Array<ThrottleEvent>>;
     /**
      * / Return recent timeline events for a customer, sorted by timestamp descending.
      * / Scoped to the providers the caller is assigned to.
@@ -706,7 +950,8 @@ export interface backendInterface {
         results: Array<SearchResult>;
     }>;
     /**
-     * / Returns true if credentials have been saved for at least one provider.
+     * / Returns true if a credential has been configured for at least one provider
+     * / in the vault.
      */
     hasAdminCredentials(): Promise<boolean>;
     http_request(request: {
@@ -756,10 +1001,14 @@ export interface backendInterface {
      */
     removeProviderAccess(principal: Principal, provider: ProviderType): Promise<void>;
     /**
+     * / Clear a provider's backoff state after a successful poll.
+     */
+    resetProviderBackoff(provider: ProviderType): Promise<Result_6>;
+    /**
      * / Reveal/decrypt a single secret value on demand. Composes
      * / requireAuth and writes an audit entry recording the reveal.
      */
-    revealVaultSecret(provider: ProviderType, name: VaultSecretName): Promise<Result_1>;
+    revealVaultSecret(provider: ProviderType, name: VaultSecretName): Promise<Result_5>;
     /**
      * / Revoke IAM credentials for a user/service account across providers.
      */
@@ -770,6 +1019,29 @@ export interface backendInterface {
         accessKeyId?: string;
         dryRun: boolean;
     }): Promise<PlaybookResult>;
+    /**
+     * / Run the unacknowledged-notification escalation check. For every
+     * / notification whose rule defines an escalation window that has elapsed and
+     * / that is still unacknowledged, deliver the escalation to the configured
+     * / escalation recipient through the configured channel and record it in the
+     * / notification log. Returns the number of escalations delivered.
+     * /
+     * / This is the public entry point that drives `NotificationRouter.escalationsDue`;
+     * / the same internal runner is also invoked from the system heartbeat so
+     * / escalation runs without a manual call.
+     */
+    runEscalationCheck(): Promise<bigint>;
+    /**
+     * / Run a report on demand for an explicit date range, email it to the
+     * / configured recipients, and record the run with its per-recipient
+     * / delivery outcomes.
+     */
+    runReportOnDemand(reportType: ReportType, periodStart: Timestamp, periodEnd: Timestamp, customer: CustomerId, providerScope: Array<ProviderType>): Promise<Result_4>;
+    /**
+     * / Record a scheduled report run (weekly or monthly) for a customer,
+     * / emailing the configured recipients and storing the delivery outcomes.
+     */
+    runScheduledReport(reportType: ReportType, trigger: ReportTrigger, customer: CustomerId, providerScope: Array<ProviderType>): Promise<Result_4>;
     /**
      * / Insert or update an alert rule.
      */
@@ -783,6 +1055,16 @@ export interface backendInterface {
         abuseIpdbKey?: string;
     }): Promise<void>;
     /**
+     * / Upsert the notification routing for a customer.
+     */
+    saveNotificationRouting(routing: NotificationRouting): Promise<Result_3>;
+    /**
+     * / Store a provider's typed credential as its isolated vault secret. Returns
+     * / `#InvalidCredential` when a required field is missing, and
+     * / `#VaultError("credential already exists")` when one is already stored.
+     */
+    saveProviderCredential(input: ProviderCredentialInput): Promise<Result_1>;
+    /**
      * / Save (upsert) a report email configuration.
      */
     saveReportEmailConfig(config: {
@@ -790,6 +1072,12 @@ export interface backendInterface {
         reportType: string;
         recipients: Array<string>;
     }): Promise<void>;
+    /**
+     * / Upsert the recipient configuration for a report type and customer.
+     * / Every recipient address is validated before saving; the first invalid
+     * / address rejects the whole configuration.
+     */
+    saveReportRecipients(config: ReportRecipientConfig): Promise<Result_2>;
     /**
      * / Store a new named secret for a provider. Encrypted at rest; the value is
      * / never returned. Composes requireAuth and writes an audit entry.
@@ -807,16 +1095,28 @@ export interface backendInterface {
     setPollingInterval(provider: ProviderType, interval: PollingInterval): Promise<void>;
     /**
      * / Validate stored AWS credentials against the live API.
+     * / Resolves the credential from the AWS vault entry; reports not configured
+     * / when the vault has no AWS credential.
      */
     testAwsConnection(): Promise<ConnectionTestResult>;
     /**
      * / Validate stored Azure credentials against the live API.
+     * / Resolves the credential from the Azure vault entry; reports not configured
+     * / when the vault has no Azure credential.
      */
     testAzureConnection(): Promise<ConnectionTestResult>;
     /**
      * / Validate stored GCP credentials against the live API.
+     * / Resolves the credential from the GCP vault entry; reports not configured
+     * / when the vault has no GCP credential.
      */
     testGcpConnection(): Promise<ConnectionTestResult>;
+    /**
+     * / Test a provider's stored credential against the live API. Resolves the
+     * / credential from the provider's isolated vault entry; when the provider is
+     * / unconfigured it returns a failure without attempting a connection.
+     */
+    testProviderConnection(provider: ProviderType): Promise<ConnectionTestResult>;
     transform(input: TransformationInput): Promise<TransformationOutput>;
     /**
      * / Trigger an immediate poll for the specified provider.
@@ -830,6 +1130,11 @@ export interface backendInterface {
      * / Update status, owner, and/or notes on a correlated incident. Returns true if found.
      */
     updateCorrelatedIncidentStatus(id: string, newStatus: IncidentStatus, owner: string | null, notes: string | null): Promise<boolean>;
+    /**
+     * / Overwrite a provider's typed credential in its isolated vault secret.
+     * / Returns `#NotFound` when no credential is stored yet.
+     */
+    updateProviderCredential(input: ProviderCredentialInput): Promise<Result_1>;
     /**
      * / Update an existing named secret for a provider. Composes
      * / requireAuth and writes an audit entry.

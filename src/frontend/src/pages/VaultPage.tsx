@@ -35,10 +35,12 @@ import {
 import React, { useState } from "react";
 import { toast } from "sonner";
 import { Layout } from "../components/Layout";
+import { ProviderCredentialsForm } from "../components/ProviderCredentialsForm";
 import { ProviderIcon } from "../components/ProviderIcon";
 import {
   useAuditLog,
   useDeleteVaultSecret,
+  useGetMyProviders,
   useListVaultSecrets,
   useRevealVaultSecret,
   useSaveVaultSecret,
@@ -671,6 +673,10 @@ function AuditLogSection() {
 
 export default function VaultPage() {
   const [activeProvider, setActiveProvider] = useState<ProviderType>("AWS");
+  const { data: myProviders = [], isLoading: loadingProviders } =
+    useGetMyProviders();
+
+  const hasAccess = myProviders.includes(activeProvider);
 
   return (
     <Layout>
@@ -708,6 +714,37 @@ export default function VaultPage() {
             </button>
           ))}
         </div>
+
+        {/* Provider credentials — only usable by users with access */}
+        {loadingProviders ? (
+          <div
+            data-ocid="vault.credentials.loading_state"
+            className="vault-shell px-5 py-6"
+          >
+            <Skeleton className="h-5 w-48" />
+          </div>
+        ) : hasAccess ? (
+          <ProviderCredentialsForm
+            key={`credentials-${activeProvider}`}
+            provider={activeProvider}
+          />
+        ) : (
+          <div
+            data-ocid="vault.credentials.access_denied"
+            className="vault-shell flex items-center gap-3 px-5 py-6"
+          >
+            <ShieldAlert size={18} className="vault-accent shrink-0" />
+            <div>
+              <p className="font-display text-sm font-semibold text-foreground">
+                {activeProvider} credentials unavailable
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                You are not assigned to the {activeProvider} provider. Contact
+                an administrator to request access.
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Active provider vault panel */}
         <ProviderVaultPanel key={activeProvider} provider={activeProvider} />

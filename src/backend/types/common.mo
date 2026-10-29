@@ -1,5 +1,24 @@
 module {
 
+  // ── Cross-cutting primitives ──────────────────────────────────────────────
+
+  /// Nanoseconds since the Unix epoch (signed, as returned by Time.now()).
+  public type Timestamp = Int;
+
+  /// Tenant identifier. An empty string means "all customers" in read filters.
+  public type CustomerId = Text;
+
+  /// Opaque forward cursor for cursor-paginated reads. `null` requests the
+  /// first page; a returned cursor is passed back verbatim to fetch the next.
+  public type Cursor = Text;
+
+  /// A single page of results plus the opaque cursor for the next page.
+  /// `nextCursor` is `null` when the page is the last one.
+  public type Page<T> = {
+    items      : [T];
+    nextCursor : ?Cursor;
+  };
+
   /// Which cloud provider a finding originates from
   public type ProviderType = {
     #AWS;

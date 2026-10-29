@@ -189,11 +189,11 @@ module {
       };
       case (#ok(token)) {
         let allFindingsList = List.empty<Types.RawFinding>();
-        for (subId in creds.subscriptionIds.vals()) {
+        for (subId in creds.subscriptionIds.values()) {
           let alerts = await pollAlerts(subId, token, sinceIso, transform);
           let assessments = await pollAssessments(subId, token, sinceIso, transform);
-          for (f in alerts.vals())      { allFindingsList.add(f) };
-          for (f in assessments.vals()) { allFindingsList.add(f) };
+          for (f in alerts.values())      { allFindingsList.add(f) };
+          for (f in assessments.values()) { allFindingsList.add(f) };
         };
         let allFindings = allFindingsList.toArray();
         let newCount = allFindings.size();
@@ -420,7 +420,7 @@ module {
     else
       [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
     var m = 1;
-    for (dm in months.vals()) {
+    for (dm in months.values()) {
       if (d < dm) return (y, m, d + 1);
       d -= dm;
       m += 1;

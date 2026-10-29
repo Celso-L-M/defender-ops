@@ -14,7 +14,7 @@ module {
   /// Returns true if `t` (lowercased) contains any of the given keywords.
   public func textContainsAny(t : Text, keywords : [Text]) : Bool {
     let lower = t.toLower();
-    for (kw in keywords.vals()) {
+    for (kw in keywords.values()) {
       if (lower.contains(#text (kw.toLower()))) return true;
     };
     false;
@@ -27,11 +27,11 @@ module {
     alertId1          : Text,
     alertId2          : Text,
   ) : Bool {
-    for ((_, inc) in existingIncidents.vals()) {
+    for ((_, inc) in existingIncidents.values()) {
       if (inc.incidentType == incidentType) {
         var seenA1 = false;
         var seenA2 = false;
-        for (id in inc.sourceAlerts.vals()) {
+        for (id in inc.sourceAlerts.values()) {
           if (id == alertId1) seenA1 := true;
           if (id == alertId2) seenA2 := true;
         };
@@ -56,7 +56,7 @@ module {
     var results : [Types.CorrelatedIncident] = [];
 
     // Collect Azure brute-force / password-spray alerts
-    for ((azureId, azureAlert) in alerts.vals()) {
+    for ((azureId, azureAlert) in alerts.values()) {
       switch (azureAlert.provider) {
         case (#Azure) {
           let isAzureBrute = textContainsAny(
@@ -65,7 +65,7 @@ module {
           );
           if (isAzureBrute) {
             // Look for matching AWS IAM pivot within 30 min after
-            for ((awsId, awsAlert) in alerts.vals()) {
+            for ((awsId, awsAlert) in alerts.values()) {
               switch (awsAlert.provider) {
                 case (#AWS) {
                   let isAwsIam = textContainsAny(
@@ -126,7 +126,7 @@ module {
     var results : [Types.CorrelatedIncident] = [];
 
     // Find AWS S3 download / GetObject anomalies
-    for ((awsId, awsAlert) in alerts.vals()) {
+    for ((awsId, awsAlert) in alerts.values()) {
       switch (awsAlert.provider) {
         case (#AWS) {
           let haystack = awsAlert.title # " " # awsAlert.description;
@@ -134,7 +134,7 @@ module {
           let hasDownload = textContainsAny(haystack, ["download", "getobject", "get object", "objectread"]);
           if (hasS3 and hasDownload) {
             // Look for matching Azure blob storage download anomaly within 15 min
-            for ((azureId, azureAlert) in alerts.vals()) {
+            for ((azureId, azureAlert) in alerts.values()) {
               switch (azureAlert.provider) {
                 case (#Azure) {
                   let azureHaystack = azureAlert.title # " " # azureAlert.description;
@@ -193,7 +193,7 @@ module {
       checkMultiCloudDataExfiltration,
     ];
     var all : [Types.CorrelatedIncident] = [];
-    for (pattern in patterns.vals()) {
+    for (pattern in patterns.values()) {
       all := all.concat(pattern(existingIncidents, alerts));
     };
     all;
@@ -217,7 +217,7 @@ module {
     // Accumulate per-type counts using a simple association list
     var typeCounts : [(Text, Nat)] = [];
 
-    for ((_, inc) in incidents.vals()) {
+    for ((_, inc) in incidents.values()) {
       totalAllTime += 1;
       let age = nowNs - inc.detectedAt;
       if (age <= dayNs)  totalToday    += 1;

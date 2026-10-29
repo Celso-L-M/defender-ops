@@ -3,11 +3,13 @@ import { ProviderType as BackendProviderType } from "@/backend.d";
 import type {
   ComplianceFramework as BackendComplianceFramework,
   PollingInterval as BackendPollingInterval,
+  ConnectionTestResult,
 } from "@/backend.d";
 import { useActor } from "@caffeineai/core-infrastructure";
 import { Principal } from "@icp-sdk/core/principal";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
+  AlertPage,
   AlertRule,
   AlertStatus,
   Asset,
@@ -19,6 +21,7 @@ import type {
   CorrelatedIncident,
   CorrelationStats,
   CredentialHealthStatus,
+  CredentialResult,
   DisableAzureAdRequest,
   EscalateToIncidentRequest,
   FailedIngestion,
@@ -29,15 +32,23 @@ import type {
   IsolateResourceRequest,
   NormalizedAlert,
   NotificationLog,
+  NotificationRouting,
   PipelineHealthStats,
   PlaybookResult,
   PollingInterval,
+  ProviderCredentialInput,
+  ProviderCredentialStatus,
   ProviderPollingState,
   ProviderType,
+  RateLimitBackoffState,
   RawFinding,
   ReportEmailConfig,
+  ReportRecipientConfig,
+  ReportRun,
+  ReportType,
   RevokeIamRequest,
   SearchResult,
+  ThrottleEvent,
   TimelineEvent,
   UserAssignmentView,
   VaultEntryView,
@@ -206,37 +217,7 @@ export function useCredentialHealth() {
     queryKey: ["credentialHealth"],
     queryFn: async () => {
       if (!actor) return [];
-      const raw = await actor.getCredentialHealth();
-      return (
-        raw as Array<{
-          provider: string;
-          health: {
-            __kind__: string;
-            Error?: string;
-            ExpiringSoon?: string;
-            Authenticating?: null;
-            Valid?: null;
-            Expired?: null;
-          };
-          expiryNs?: bigint;
-        }>
-      ).map((item) => ({
-        provider: item.provider,
-        expiryNs: item.expiryNs ?? null,
-        health: (() => {
-          const h = item.health;
-          if (h.__kind__ === "Valid") return { __kind__: "Valid" } as const;
-          if (h.__kind__ === "Authenticating")
-            return { __kind__: "Authenticating" } as const;
-          if (h.__kind__ === "ExpiringSoon")
-            return {
-              __kind__: "ExpiringSoon",
-              _0: h.ExpiringSoon ?? "",
-            } as const;
-          if (h.__kind__ === "Expired") return { __kind__: "Expired" } as const;
-          return { __kind__: "Error", _0: h.Error ?? "Unknown error" } as const;
-        })(),
-      }));
+      return actor.getCredentialHealth();
     },
     enabled: !!actor && !isFetching,
     staleTime: STALE_30S / 2,
@@ -317,7 +298,7 @@ export function useNormalizedAlerts(filter: {
     queryKey: ["normalizedAlerts", filter],
     queryFn: async () => {
       if (!actor) return [];
-      return actor.getNormalizedAlerts({
+      const page = (await actor.getNormalizedAlerts({
         customer: filter.customer,
         limit: BigInt(filter.limit),
         ...(filter.provider
@@ -329,7 +310,44 @@ export function useNormalizedAlerts(filter: {
         ...(filter.status
           ? { status: filter.status as import("@/backend.d").AlertStatus }
           : {}),
-      }) as Promise<NormalizedAlert[]>;
+      })) as { items: NormalizedAlert[]; nextCursor?: string };
+      return page.items;
+    },
+    enabled: !!actor && !isFetching,
+    staleTime: STALE_30S,
+  });
+}
+
+// Cursor-paginated variant of the alerts query. Returns the full page so a
+// screen can pass the cursor back and read the page items plus next cursor.
+export function useNormalizedAlertsPage(filter: {
+  customer: string;
+  limit: number;
+  cursor?: string;
+  provider?: ProviderType;
+  severity?: string;
+  status?: AlertStatus;
+}) {
+  const { actor, isFetching } = useActor(createActor);
+  return useQuery<AlertPage>({
+    queryKey: ["normalizedAlertsPage", filter],
+    queryFn: async () => {
+      if (!actor) return { items: [] };
+      const page = (await actor.getNormalizedAlerts({
+        customer: filter.customer,
+        limit: BigInt(filter.limit),
+        ...(filter.cursor ? { cursor: filter.cursor } : {}),
+        ...(filter.provider
+          ? { provider: toBackendProvider(filter.provider) }
+          : {}),
+        ...(filter.severity
+          ? { severity: filter.severity as import("@/backend.d").Severity }
+          : {}),
+        ...(filter.status
+          ? { status: filter.status as import("@/backend.d").AlertStatus }
+          : {}),
+      })) as AlertPage;
+      return page;
     },
     enabled: !!actor && !isFetching,
     staleTime: STALE_30S,
@@ -607,27 +625,15 @@ export function useBlockIp() {
   return useMutation<PlaybookResult, Error, BlockIpRequest>({
     mutationFn: async (req: BlockIpRequest) => {
       if (!actor) throw new Error("Actor not ready");
-      const raw = (await actor.blockIp({
+      const raw = await actor.blockIp({
         ip: req.ip,
         customer: req.customer,
         providers: req.providers as Parameters<
           typeof actor.blockIp
         >[0]["providers"],
         dryRun: req.dryRun,
-      })) as {
-        success: boolean;
-        message: string;
-        dryRunPreview?: string;
-        rawApiError?: string;
-        provider?: string;
-      };
-      return {
-        success: raw.success,
-        message: raw.message,
-        dryRunPreview: raw.dryRunPreview ?? null,
-        rawApiError: raw.rawApiError ?? null,
-        provider: raw.provider ?? null,
-      };
+      });
+      return raw;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["auditLog"] });
@@ -641,25 +647,13 @@ export function useIsolateResource() {
   return useMutation<PlaybookResult, Error, IsolateResourceRequest>({
     mutationFn: async (req: IsolateResourceRequest) => {
       if (!actor) throw new Error("Actor not ready");
-      const raw = (await actor.isolateResource({
+      const raw = await actor.isolateResource({
         resourceId: req.resourceId,
         provider: toBackendProvider(req.provider),
         customer: req.customer,
         dryRun: req.dryRun,
-      })) as {
-        success: boolean;
-        message: string;
-        dryRunPreview?: string;
-        rawApiError?: string;
-        provider?: string;
-      };
-      return {
-        success: raw.success,
-        message: raw.message,
-        dryRunPreview: raw.dryRunPreview ?? null,
-        rawApiError: raw.rawApiError ?? null,
-        provider: raw.provider ?? null,
-      };
+      });
+      return raw;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["auditLog"] });
@@ -673,25 +667,13 @@ export function useRevokeIamCredentials() {
   return useMutation<PlaybookResult, Error, RevokeIamRequest>({
     mutationFn: async (req: RevokeIamRequest) => {
       if (!actor) throw new Error("Actor not ready");
-      const raw = (await actor.revokeIamCredentials({
+      const raw = await actor.revokeIamCredentials({
         userId: req.userId,
         provider: toBackendProvider(req.provider),
         customer: req.customer,
         dryRun: req.dryRun,
-      })) as {
-        success: boolean;
-        message: string;
-        dryRunPreview?: string;
-        rawApiError?: string;
-        provider?: string;
-      };
-      return {
-        success: raw.success,
-        message: raw.message,
-        dryRunPreview: raw.dryRunPreview ?? null,
-        rawApiError: raw.rawApiError ?? null,
-        provider: raw.provider ?? null,
-      };
+      });
+      return raw;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["auditLog"] });
@@ -705,24 +687,12 @@ export function useDisableAzureAdAccount() {
   return useMutation<PlaybookResult, Error, DisableAzureAdRequest>({
     mutationFn: async (req: DisableAzureAdRequest) => {
       if (!actor) throw new Error("Actor not ready");
-      const raw = (await actor.disableAzureAdAccount({
+      const raw = await actor.disableAzureAdAccount({
         userPrincipalName: req.userPrincipalName,
         customer: req.customer,
         dryRun: req.dryRun,
-      })) as {
-        success: boolean;
-        message: string;
-        dryRunPreview?: string;
-        rawApiError?: string;
-        provider?: string;
-      };
-      return {
-        success: raw.success,
-        message: raw.message,
-        dryRunPreview: raw.dryRunPreview ?? null,
-        rawApiError: raw.rawApiError ?? null,
-        provider: raw.provider ?? null,
-      };
+      });
+      return raw;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["auditLog"] });
@@ -736,24 +706,12 @@ export function useForceGcpIamReview() {
   return useMutation<PlaybookResult, Error, ForceGcpIamReviewRequest>({
     mutationFn: async (req: ForceGcpIamReviewRequest) => {
       if (!actor) throw new Error("Actor not ready");
-      const raw = (await actor.forceGcpIamReview({
+      const raw = await actor.forceGcpIamReview({
         projectId: req.projectId,
         customer: req.customer,
         dryRun: req.dryRun,
-      })) as {
-        success: boolean;
-        message: string;
-        dryRunPreview?: string;
-        rawApiError?: string;
-        provider?: string;
-      };
-      return {
-        success: raw.success,
-        message: raw.message,
-        dryRunPreview: raw.dryRunPreview ?? null,
-        rawApiError: raw.rawApiError ?? null,
-        provider: raw.provider ?? null,
-      };
+      });
+      return raw;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["auditLog"] });
@@ -767,27 +725,15 @@ export function useEscalateToIncident() {
   return useMutation<PlaybookResult, Error, EscalateToIncidentRequest>({
     mutationFn: async (req: EscalateToIncidentRequest) => {
       if (!actor) throw new Error("Actor not ready");
-      const raw = (await actor.escalateToIncident({
+      const raw = await actor.escalateToIncident({
         alertId: req.alertId,
         severity: req.severity,
         assignedOwner: req.assignedOwner,
         notes: req.notes,
         customer: req.customer,
         dryRun: req.dryRun,
-      })) as {
-        success: boolean;
-        message: string;
-        dryRunPreview?: string;
-        rawApiError?: string;
-        provider?: string;
-      };
-      return {
-        success: raw.success,
-        message: raw.message,
-        dryRunPreview: raw.dryRunPreview ?? null,
-        rawApiError: raw.rawApiError ?? null,
-        provider: raw.provider ?? null,
-      };
+      });
+      return raw;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["auditLog"] });
@@ -1167,11 +1113,95 @@ export function useRevealVaultSecret() {
         toBackendProvider(provider),
         name,
       )) as VaultResult<string>;
-      if (result.__kind__ === "err") throw new Error(result.err.__kind__);
+      if (result.__kind__ === "err") throw new Error(String(result.err));
       return result.ok;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["vaultSecrets"] });
+    },
+  });
+}
+
+// ── Provider credential hooks ──────────────────────────────────────────────
+
+export function useProviderCredentialStatus(provider: ProviderType) {
+  const { actor, isFetching } = useActor(createActor);
+  return useQuery<ProviderCredentialStatus>({
+    queryKey: ["providerCredentialStatus", provider],
+    queryFn: async () => {
+      if (!actor) return { provider, configured: false, fields: [] };
+      return actor.getProviderCredentialStatus(
+        toBackendProvider(provider),
+      ) as unknown as Promise<ProviderCredentialStatus>;
+    },
+    enabled: !!actor && !isFetching,
+    staleTime: STALE_30S,
+  });
+}
+
+export function useSaveProviderCredential() {
+  const { actor } = useActor(createActor);
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: ProviderCredentialInput) => {
+      if (!actor) throw new Error("Actor not ready");
+      return actor.saveProviderCredential(
+        input as Parameters<typeof actor.saveProviderCredential>[0],
+      ) as Promise<CredentialResult>;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["providerCredentialStatus"] });
+      qc.invalidateQueries({ queryKey: ["auditLog"] });
+    },
+  });
+}
+
+export function useUpdateProviderCredential() {
+  const { actor } = useActor(createActor);
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: ProviderCredentialInput) => {
+      if (!actor) throw new Error("Actor not ready");
+      return actor.updateProviderCredential(
+        input as Parameters<typeof actor.updateProviderCredential>[0],
+      ) as Promise<CredentialResult>;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["providerCredentialStatus"] });
+      qc.invalidateQueries({ queryKey: ["auditLog"] });
+    },
+  });
+}
+
+export function useClearProviderCredential() {
+  const { actor } = useActor(createActor);
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (provider: ProviderType) => {
+      if (!actor) throw new Error("Actor not ready");
+      return actor.clearProviderCredential(
+        toBackendProvider(provider),
+      ) as Promise<CredentialResult>;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["providerCredentialStatus"] });
+      qc.invalidateQueries({ queryKey: ["auditLog"] });
+    },
+  });
+}
+
+export function useTestProviderConnection(provider: ProviderType) {
+  const { actor } = useActor(createActor);
+  return useMutation({
+    mutationFn: async () => {
+      if (!actor) throw new Error("Actor not ready");
+      const result = (await actor.testProviderConnection(
+        toBackendProvider(provider),
+      )) as ConnectionTestResult;
+      if (result.__kind__ === "Success") {
+        return { success: true, message: result.Success };
+      }
+      return { success: false, message: result.Failure };
     },
   });
 }
@@ -1296,5 +1326,264 @@ export function useGlobalSearch(query: string, customer: string) {
     },
     enabled: !!actor && !isFetching && query.length >= 2,
     staleTime: 10_000,
+  });
+}
+
+// ── Report run hooks ───────────────────────────────────────────────────────
+
+export function useReportRuns(customer: string, limit: number) {
+  const { actor, isFetching } = useActor(createActor);
+  return useQuery<ReportRun[]>({
+    queryKey: ["reportRuns", customer, limit],
+    queryFn: async () => {
+      if (!actor) return [];
+      return actor.getReportRuns(customer, BigInt(limit)) as Promise<
+        ReportRun[]
+      >;
+    },
+    enabled: !!actor && !isFetching,
+    staleTime: STALE_30S,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: false,
+  });
+}
+
+export function useReportRun(runId: string, customer: string) {
+  const { actor, isFetching } = useActor(createActor);
+  return useQuery<ReportRun | null>({
+    queryKey: ["reportRun", runId, customer],
+    queryFn: async () => {
+      if (!actor) return null;
+      return actor.getReportRun(runId, customer) as Promise<ReportRun | null>;
+    },
+    enabled: !!actor && !isFetching && !!runId,
+    staleTime: STALE_30S,
+  });
+}
+
+export function useReportRecipients(reportType: ReportType, customer: string) {
+  const { actor, isFetching } = useActor(createActor);
+  return useQuery<ReportRecipientConfig | null>({
+    queryKey: ["reportRecipients", reportType, customer],
+    queryFn: async () => {
+      if (!actor) return null;
+      return actor.getReportRecipients(
+        reportType as Parameters<typeof actor.getReportRecipients>[0],
+        customer,
+      ) as Promise<ReportRecipientConfig | null>;
+    },
+    enabled: !!actor && !isFetching,
+    staleTime: STALE_30S,
+  });
+}
+
+export function useSaveReportRecipients() {
+  const { actor } = useActor(createActor);
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (config: ReportRecipientConfig) => {
+      if (!actor) throw new Error("Actor not ready");
+      const raw = (await actor.saveReportRecipients(
+        config as Parameters<typeof actor.saveReportRecipients>[0],
+      )) as
+        | { __kind__: "ok"; ok: null }
+        | { __kind__: "err"; err: { __kind__: string } };
+      if (raw.__kind__ === "err") throw new Error(raw.err.__kind__);
+      return raw.ok;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["reportRecipients"] });
+    },
+  });
+}
+
+export function useRunReportOnDemand() {
+  const { actor } = useActor(createActor);
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      reportType,
+      periodStart,
+      periodEnd,
+      customer,
+      providerScope,
+    }: {
+      reportType: ReportType;
+      periodStart: bigint;
+      periodEnd: bigint;
+      customer: string;
+      providerScope: ProviderType[];
+    }) => {
+      if (!actor) throw new Error("Actor not ready");
+      const raw = (await actor.runReportOnDemand(
+        reportType as Parameters<typeof actor.runReportOnDemand>[0],
+        periodStart,
+        periodEnd,
+        customer,
+        providerScope.map(toBackendProvider),
+      )) as
+        | { __kind__: "ok"; ok: ReportRun }
+        | { __kind__: "err"; err: { __kind__: string } };
+      if (raw.__kind__ === "err") throw new Error(raw.err.__kind__);
+      return raw.ok;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["reportRuns"] });
+    },
+  });
+}
+
+export function useRunScheduledReport() {
+  const { actor } = useActor(createActor);
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      reportType,
+      trigger,
+      customer,
+      providerScope,
+    }: {
+      reportType: ReportType;
+      trigger: "ScheduledWeekly" | "ScheduledMonthly";
+      customer: string;
+      providerScope: ProviderType[];
+    }) => {
+      if (!actor) throw new Error("Actor not ready");
+      const raw = (await actor.runScheduledReport(
+        reportType as Parameters<typeof actor.runScheduledReport>[0],
+        trigger as Parameters<typeof actor.runScheduledReport>[1],
+        customer,
+        providerScope.map(toBackendProvider),
+      )) as
+        | { __kind__: "ok"; ok: ReportRun }
+        | { __kind__: "err"; err: { __kind__: string } };
+      if (raw.__kind__ === "err") throw new Error(raw.err.__kind__);
+      return raw.ok;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["reportRuns"] });
+    },
+  });
+}
+
+export function useExportReportPdf() {
+  const { actor } = useActor(createActor);
+  return useMutation({
+    mutationFn: async ({
+      reportType,
+      periodStart,
+      periodEnd,
+      customer,
+      providerScope,
+    }: {
+      reportType: ReportType;
+      periodStart: bigint;
+      periodEnd: bigint;
+      customer: string;
+      providerScope: ProviderType[];
+    }) => {
+      if (!actor) throw new Error("Actor not ready");
+      return actor.exportReportPdf(
+        reportType as Parameters<typeof actor.exportReportPdf>[0],
+        periodStart,
+        periodEnd,
+        customer,
+        providerScope.map(toBackendProvider),
+      ) as Promise<Uint8Array>;
+    },
+  });
+}
+
+// ── Notification routing hooks ─────────────────────────────────────────────
+
+export function useNotificationRouting(customer: string) {
+  const { actor, isFetching } = useActor(createActor);
+  return useQuery<NotificationRouting | null>({
+    queryKey: ["notificationRouting", customer],
+    queryFn: async () => {
+      if (!actor) return null;
+      return actor.getNotificationRouting(
+        customer,
+      ) as Promise<NotificationRouting | null>;
+    },
+    enabled: !!actor && !isFetching,
+    staleTime: STALE_30S,
+  });
+}
+
+export function useSaveNotificationRouting() {
+  const { actor } = useActor(createActor);
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (routing: NotificationRouting) => {
+      if (!actor) throw new Error("Actor not ready");
+      const raw = (await actor.saveNotificationRouting(
+        routing as Parameters<typeof actor.saveNotificationRouting>[0],
+      )) as
+        | { __kind__: "ok"; ok: null }
+        | { __kind__: "err"; err: { __kind__: string } };
+      if (raw.__kind__ === "err") throw new Error(raw.err.__kind__);
+      return raw.ok;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["notificationRouting"] });
+    },
+  });
+}
+
+// ── Rate-limit backoff hooks ───────────────────────────────────────────────
+
+export function useRateLimitStates() {
+  const { actor, isFetching } = useActor(createActor);
+  return useQuery<RateLimitBackoffState[]>({
+    queryKey: ["rateLimitStates"],
+    queryFn: async () => {
+      if (!actor) return [];
+      return actor.getRateLimitStates() as Promise<RateLimitBackoffState[]>;
+    },
+    enabled: !!actor && !isFetching,
+    staleTime: STALE_30S / 2,
+    refetchInterval: STALE_30S,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: false,
+  });
+}
+
+export function useThrottleEvents(
+  provider: ProviderType | null,
+  limit: number,
+) {
+  const { actor, isFetching } = useActor(createActor);
+  return useQuery<ThrottleEvent[]>({
+    queryKey: ["throttleEvents", provider, limit],
+    queryFn: async () => {
+      if (!actor) return [];
+      return actor.getThrottleEvents(
+        provider ? toBackendProvider(provider) : null,
+        BigInt(limit),
+      ) as Promise<ThrottleEvent[]>;
+    },
+    enabled: !!actor && !isFetching,
+    staleTime: STALE_30S,
+  });
+}
+
+export function useResetProviderBackoff() {
+  const { actor } = useActor(createActor);
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (provider: ProviderType) => {
+      if (!actor) throw new Error("Actor not ready");
+      const raw = (await actor.resetProviderBackoff(
+        toBackendProvider(provider),
+      )) as
+        | { __kind__: "ok"; ok: null }
+        | { __kind__: "err"; err: { __kind__: string } };
+      if (raw.__kind__ === "err") throw new Error(raw.err.__kind__);
+      return raw.ok;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["rateLimitStates"] });
+    },
   });
 }

@@ -1,19 +1,22 @@
 {
-  "overview": "Defender Ops is a multi-cloud SecOps platform for AWS, Azure, and GCP with a centralized per-provider secure vault for credentials, API keys, and secrets.",
+  "overview": "Defender Ops is a multi-cloud security operations platform that ingests AWS, Azure and GCP findings, correlates them into incidents, tracks compliance, and now adds scheduled reporting, PDF export, email delivery and alert notification routing.",
   "features": [
-    "Store arbitrary named secrets per cloud provider in a centralized vault",
-    "Encrypt secrets at rest in the backend canister",
-    "Allow authorized admins to reveal or decrypt secrets on demand",
-    "Enforce per-provider access control on vault operations",
-    "Record every vault action in the audit log"
+    "Scheduled weekly and monthly security reports with on-demand custom date ranges",
+    "Branded PDF report export with charts, table of contents and executive summary",
+    "Email delivery of reports to configured recipients per report type",
+    "Per-provider rate-limit backoff counters on the dashboard",
+    "Per-customer access control that gates data and navigation in the UI",
+    "Cursor pagination for large alert volumes",
+    "Alert rule builder with in-app, email and Microsoft Teams notification routing",
+    "Notification deduplication, escalation and a full notification log"
   ],
   "category": "security-operations",
   "tags": [
     "security",
     "cloud",
-    "vault",
-    "secrets",
-    "secops"
+    "monitoring",
+    "reporting",
+    "notifications"
   ],
-  "last_updated": "2026-09-13T11:20:18.093Z"
+  "last_updated": "2026-10-28T19:11:31.806Z"
 }

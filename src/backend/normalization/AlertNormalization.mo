@@ -151,7 +151,7 @@ module {
     newAlert : NormalizedAlert,
   ) : (Bool, NormalizedAlert) {
     // Phase 2 dedup: provider + assetId + title for Open alerts
-    for ((_, existing) in alerts.vals()) {
+    for ((_, existing) in alerts.values()) {
       let sameProvider = switch (existing.provider, newAlert.provider) {
         case (#AWS,   #AWS)   true;
         case (#Azure, #Azure) true;
@@ -178,7 +178,7 @@ module {
       };
     };
     // Legacy dedup fallback: same findingId + provider
-    for ((_, existing) in alerts.vals()) {
+    for ((_, existing) in alerts.values()) {
       let sameProvider = switch (existing.provider, newAlert.provider) {
         case (#AWS,   #AWS)   true;
         case (#Azure, #Azure) true;

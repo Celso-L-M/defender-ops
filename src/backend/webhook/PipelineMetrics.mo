@@ -50,7 +50,7 @@ module {
       var latencySum : Float = 0.0;
       var latencyCount   = 0;
 
-      for (ev in arr.vals()) {
+      for (ev in arr.values()) {
         let sameProvider = switch (ev.provider, p) {
           case (#AWS,   #AWS)   true;
           case (#Azure, #Azure) true;
@@ -72,7 +72,7 @@ module {
       };
 
       var failedCount = 0;
-      for (fi in failArr.vals()) {
+      for (fi in failArr.values()) {
         let sameProvider = switch (fi.provider, p) {
           case (#AWS,   #AWS)   true;
           case (#Azure, #Azure) true;

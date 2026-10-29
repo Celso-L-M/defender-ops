@@ -60,6 +60,27 @@ vi.mock("../hooks/use-backend", () => ({
     isPending: false,
   }),
   useAuditLog: (...args: unknown[]) => auditLogMock(...args),
+  useProviderCredentialStatus: (provider: string) => ({
+    data: { provider, configured: false, fields: [] },
+    isLoading: false,
+  }),
+  useSaveProviderCredential: () => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
+  }),
+  useUpdateProviderCredential: () => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
+  }),
+  useClearProviderCredential: () => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
+  }),
+  useTestProviderConnection: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+    data: undefined,
+  }),
   useGetMyProviders: () => ({
     data: ["AWS", "Azure", "GCP"],
     isLoading: false,

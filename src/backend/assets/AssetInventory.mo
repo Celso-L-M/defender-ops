@@ -136,7 +136,7 @@ module {
         var highCount     = 0;
         var mediumCount   = 0;
         var lowCount      = 0;
-        for ((_, a) in openAlerts.vals()) {
+        for ((_, a) in openAlerts.values()) {
           switch (a.severity) {
             case (#Critical) { criticalCount += 1 };
             case (#High)     { highCount     += 1 };

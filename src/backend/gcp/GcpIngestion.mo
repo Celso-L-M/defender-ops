@@ -321,14 +321,14 @@ module {
       };
       case (#ok(accessToken)) {
         let allFindings = List.empty<Types.RawFinding>();
-        for (projectId in creds.projectIds.vals()) {
+        for (projectId in creds.projectIds.values()) {
           let findings = await pollProject(
             projectId,
             accessToken,
             state.lastSuccessfulPoll,
             transform
           );
-          for (f in findings.vals()) {
+          for (f in findings.values()) {
             allFindings.add(f);
           };
         };

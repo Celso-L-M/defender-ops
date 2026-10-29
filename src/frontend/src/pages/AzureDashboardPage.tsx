@@ -30,6 +30,7 @@ import { toast } from "sonner";
 import { CorrelatedIncidentsPanel } from "../components/CorrelatedIncidentsPanel";
 import { Layout } from "../components/Layout";
 import { LoadingSpinner } from "../components/LoadingSpinner";
+import { ProviderCredentialsForm } from "../components/ProviderCredentialsForm";
 import { SecurityEventFeed } from "../components/SecurityEventFeed";
 import { SeverityBadge } from "../components/SeverityBadge";
 import { StatusBadge } from "../components/StatusBadge";
@@ -807,6 +808,14 @@ export default function AzureDashboardPage() {
 
         {/* Quick actions */}
         <AzureQuickActions />
+
+        {/* Provider credentials — Azure typed schema, access-gated with the dashboard */}
+        <div
+          data-ocid="azure_dashboard.credentials.section"
+          className="provider-shell provider-tint rounded-lg"
+        >
+          <ProviderCredentialsForm provider={AZURE} />
+        </div>
       </div>
     </Layout>
   );

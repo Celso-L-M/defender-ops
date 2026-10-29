@@ -14,7 +14,7 @@ module {
     alert : Types.NormalizedAlert
   ) : [Types.AlertRule] {
     let matched = List.empty<Types.AlertRule>();
-    for ((_, rule) in rules.vals()) {
+    for ((_, rule) in rules.values()) {
       if (rule.enabled) {
         // Multi-tenant: empty customer means global rule
         let custOk = rule.customer == "" or Text.equal(rule.customer, alert.customer);
@@ -110,7 +110,7 @@ module {
     nowNs           : Int
   ) : Bool {
     var mostRecentTs : ?Int = null;
-    for ((_, entry) in log.vals()) {
+    for ((_, entry) in log.values()) {
       if (Text.equal(entry.alertId, alertId) and Text.equal(entry.ruleId, ruleId)) {
         switch (mostRecentTs) {
           case null { mostRecentTs := ?entry.timestamp };
@@ -164,10 +164,10 @@ module {
   ) : [(Types.AlertRule, Types.NotificationLog)] {
     let result = List.empty<(Types.AlertRule, Types.NotificationLog)>();
     // Build a quick lookup map: ruleId -> AlertRule
-    for ((_, entry) in logs.vals()) {
+    for ((_, entry) in logs.values()) {
       if (not entry.acknowledged) {
         // Find the matching rule
-        for ((_, rule) in rules.vals()) {
+        for ((_, rule) in rules.values()) {
           if (Text.equal(rule.id, entry.ruleId)) {
             switch (rule.escalationMinutes) {
               case null {};

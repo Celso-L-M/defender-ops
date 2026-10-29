@@ -21,19 +21,20 @@ import {
   Clock,
   Crosshair,
   Globe,
+  Loader2,
   Search,
   Server,
   ShieldAlert,
   Sparkles,
   Zap,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Layout } from "../components/Layout";
 import { ProviderIcon } from "../components/ProviderIcon";
 import { SeverityBadge } from "../components/SeverityBadge";
 import {
   useEnrichAlert,
-  useNormalizedAlerts,
+  useNormalizedAlertsPage,
   useUpdateAlertOwner,
   useUpdateAlertStatus,
 } from "../hooks/use-backend";
@@ -48,6 +49,8 @@ import type {
 type ProviderFilter = "All" | ProviderType;
 type SeverityFilter = "All" | Severity;
 type StatusFilter = "All" | AlertStatus;
+
+const PAGE_SIZE = 50;
 
 const STATUS_STYLES: Record<AlertStatus, string> = {
   Open: "border-destructive text-destructive bg-destructive/10",
@@ -69,11 +72,7 @@ function truncate(str: string, max: number): string {
   return str.length <= max ? str : `${str.slice(0, max)}…`;
 }
 
-function EnrichmentSection({
-  alert,
-}: {
-  alert: NormalizedAlert;
-}) {
+function EnrichmentSection({ alert }: { alert: NormalizedAlert }) {
   const enrich = useEnrichAlert();
   const enrichment = alert.enrichment as AlertEnrichment | null | undefined;
 
@@ -502,22 +501,61 @@ function AlertDetailPanel({
 }
 
 export default function AlertsPage() {
-  const { data: alerts = [], isLoading } = useNormalizedAlerts({
-    customer: "",
-    limit: 200,
-  });
-
   const [provider, setProvider] = useState<ProviderFilter>("All");
   const [severity, setSeverity] = useState<SeverityFilter>("All");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("All");
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<NormalizedAlert | null>(null);
 
+  // Cursor pagination. The first page is requested without a cursor; "load
+  // more" requests the next page with the cursor the backend returned and
+  // appends it. A filter change resets the accumulated pages and the cursor.
+  const [cursor, setCursor] = useState<string | undefined>(undefined);
+  const [pages, setPages] = useState<NormalizedAlert[][]>([]);
+
+  const filterKey = `${provider}|${severity}|${statusFilter}`;
+  const prevFilterKey = useRef(filterKey);
+  useEffect(() => {
+    if (prevFilterKey.current !== filterKey) {
+      prevFilterKey.current = filterKey;
+      setCursor(undefined);
+      setPages([]);
+    }
+  }, [filterKey]);
+
+  const { data, isLoading, isFetching, isError, error } =
+    useNormalizedAlertsPage({
+      customer: "",
+      limit: PAGE_SIZE,
+      ...(cursor ? { cursor } : {}),
+      ...(provider !== "All" ? { provider } : {}),
+      ...(severity !== "All" ? { severity } : {}),
+      ...(statusFilter !== "All" ? { status: statusFilter } : {}),
+    });
+
+  // Accumulate each fetched page. The first page replaces the window; later
+  // pages append. Deduplicate by id so a re-fetch never doubles a row.
+  useEffect(() => {
+    if (!data) return;
+    setPages((current) => {
+      const next = cursor ? [...current, data.items] : [data.items];
+      const seen = new Set<string>();
+      const merged: NormalizedAlert[] = [];
+      for (const page of next) {
+        for (const alert of page) {
+          if (seen.has(alert.id)) continue;
+          seen.add(alert.id);
+          merged.push(alert);
+        }
+      }
+      return [merged];
+    });
+  }, [data, cursor]);
+
+  const alerts = useMemo(() => pages[0] ?? [], [pages]);
+
   const filtered = useMemo(() => {
     return alerts.filter((a) => {
-      if (provider !== "All" && a.provider !== provider) return false;
-      if (severity !== "All" && a.severity !== severity) return false;
-      if (statusFilter !== "All" && a.status !== statusFilter) return false;
       if (
         search.trim() &&
         !a.title.toLowerCase().includes(search.trim().toLowerCase())
@@ -525,7 +563,20 @@ export default function AlertsPage() {
         return false;
       return true;
     });
-  }, [alerts, provider, severity, statusFilter, search]);
+  }, [alerts, search]);
+
+  const hasFilters =
+    !!search ||
+    provider !== "All" ||
+    severity !== "All" ||
+    statusFilter !== "All";
+
+  const nextCursor = data?.nextCursor;
+  const hasMore = !!nextCursor;
+
+  const handleLoadMore = () => {
+    if (nextCursor) setCursor(nextCursor);
+  };
 
   return (
     <Layout>
@@ -628,49 +679,94 @@ export default function AlertsPage() {
         <div className="flex-1 overflow-auto">
           {isLoading ? (
             <AlertsTableSkeleton />
+          ) : isError ? (
+            <div
+              className="flex flex-col items-center justify-center py-24 px-6 text-center"
+              data-ocid="alerts.error_state"
+            >
+              <AlertTriangle
+                size={40}
+                className="text-destructive/50 mb-4"
+                aria-hidden="true"
+              />
+              <p className="text-foreground/70 font-semibold text-base mb-1">
+                Could not load alerts
+              </p>
+              <p className="text-muted-foreground text-sm max-w-xs">
+                {(error as Error)?.message ??
+                  "The alert feed is temporarily unavailable. Try again shortly."}
+              </p>
+            </div>
           ) : filtered.length === 0 ? (
-            <AlertsEmptyState
-              hasFilters={
-                !!search ||
-                provider !== "All" ||
-                severity !== "All" ||
-                statusFilter !== "All"
-              }
-            />
+            <AlertsEmptyState hasFilters={hasFilters} />
           ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border bg-card/60 sticky top-0 z-10">
-                  {[
-                    "Time",
-                    "Provider",
-                    "Severity",
-                    "Title",
-                    "Status",
-                    "MITRE",
-                    "Asset",
-                    "",
-                  ].map((h) => (
-                    <th
-                      key={h}
-                      className="px-4 py-2.5 text-left text-[10px] uppercase tracking-widest font-semibold text-muted-foreground whitespace-nowrap"
-                    >
-                      {h}
-                    </th>
+            <>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-card/60 sticky top-0 z-10">
+                    {[
+                      "Time",
+                      "Provider",
+                      "Severity",
+                      "Title",
+                      "Status",
+                      "MITRE",
+                      "Asset",
+                      "",
+                    ].map((h) => (
+                      <th
+                        key={h}
+                        className="px-4 py-2.5 text-left text-[10px] uppercase tracking-widest font-semibold text-muted-foreground whitespace-nowrap"
+                      >
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((alert, i) => (
+                    <AlertRow
+                      key={alert.id}
+                      alert={alert}
+                      index={i + 1}
+                      onView={() => setSelected(alert)}
+                    />
                   ))}
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((alert, i) => (
-                  <AlertRow
-                    key={alert.id}
-                    alert={alert}
-                    index={i + 1}
-                    onView={() => setSelected(alert)}
-                  />
-                ))}
-              </tbody>
-            </table>
+                </tbody>
+              </table>
+
+              {/* Load more */}
+              <div className="flex items-center justify-center gap-3 px-6 py-5 border-t border-border">
+                {hasMore ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleLoadMore}
+                    disabled={isFetching}
+                    data-ocid="alerts.load_more_button"
+                    className="min-w-[160px]"
+                  >
+                    {isFetching ? (
+                      <>
+                        <Loader2 size={13} className="mr-1.5 animate-spin" />
+                        Loading…
+                      </>
+                    ) : (
+                      "Load more alerts"
+                    )}
+                  </Button>
+                ) : (
+                  <p
+                    className="text-xs text-muted-foreground"
+                    data-ocid="alerts.end_of_list"
+                  >
+                    End of results — {filtered.length}{" "}
+                    {filtered.length === 1 ? "alert" : "alerts"} shown
+                  </p>
+                )}
+              </div>
+            </>
           )}
         </div>
       </div>

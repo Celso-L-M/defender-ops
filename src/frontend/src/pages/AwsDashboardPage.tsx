@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { CorrelatedIncidentsPanel } from "../components/CorrelatedIncidentsPanel";
 import { Layout } from "../components/Layout";
 import { LoadingSpinner } from "../components/LoadingSpinner";
+import { ProviderCredentialsForm } from "../components/ProviderCredentialsForm";
 import { SecurityEventFeed } from "../components/SecurityEventFeed";
 import { StatusBadge } from "../components/StatusBadge";
 import { useProviderFilter } from "../contexts/provider-filter";
@@ -928,6 +929,14 @@ export default function AwsDashboardPage() {
         {/* Quick actions */}
         <div data-ocid="aws_dashboard.quick_actions.section" className="mt-6">
           <AwsQuickActions />
+        </div>
+
+        {/* Provider credentials — AWS typed schema, access-gated with the dashboard */}
+        <div
+          data-ocid="aws_dashboard.credentials.section"
+          className="mt-6 provider-shell provider-tint"
+        >
+          <ProviderCredentialsForm provider={AWS} />
         </div>
       </div>
     </Layout>

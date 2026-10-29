@@ -135,7 +135,7 @@ module {
     let frameworkControls = baseControls(framework);
 
     let inFramework = func(id : Text) : Bool {
-      for (c in frameworkControls.vals()) {
+      for (c in frameworkControls.values()) {
         if (Text.equal(c.controlId, id)) return true;
       };
       false;
@@ -145,7 +145,7 @@ module {
     let result = List.empty<Text>();
 
     let addIfMatch = func(candidates : [Text]) {
-      for (id in candidates.vals()) {
+      for (id in candidates.values()) {
         if (inFramework(id)) {
           var alreadySeen = false;
           for (s in seen.values()) {
@@ -264,7 +264,7 @@ module {
   ) : { total : Nat; passing : Nat; failing : Nat; score : Nat } {
     var passing = 0;
     var failing = 0;
-    for (ctrl in controls.vals()) {
+    for (ctrl in controls.values()) {
       switch (ctrl.status) {
         case (#Passing)    { passing += 1 };
         case (#Failing)    { failing += 1 };
@@ -300,7 +300,7 @@ module {
     let fwText = frameworkText(framework);
     let header = "controlId,framework,title,status,passingFindings,failingFindings,remediationGuidance\n";
     let rows = List.empty<Text>();
-    for (ctrl in controls.vals()) {
+    for (ctrl in controls.values()) {
       let statusText = controlStatusText(ctrl.status);
       let escapedTitle = "\"" # ctrl.title # "\"";
       let escapedRemediation = "\"" # ctrl.remediationGuidance # "\"";
@@ -330,7 +330,7 @@ module {
     content := content # "Failing: " # result.failing.toText() # "\n";
     content := content # "Compliance Score: " # result.score.toText() # "%\n\n";
     content := content # "CONTROL DETAILS\n";
-    for (ctrl in controls.vals()) {
+    for (ctrl in controls.values()) {
       let marker = switch (ctrl.status) {
         case (#Passing)    "[PASS]";
         case (#Failing)    "[FAIL]";

@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { CorrelatedIncidentsPanel } from "../components/CorrelatedIncidentsPanel";
 import { Layout } from "../components/Layout";
 import { LoadingSpinner } from "../components/LoadingSpinner";
+import { ProviderCredentialsForm } from "../components/ProviderCredentialsForm";
 import { ProviderIcon } from "../components/ProviderIcon";
 import { SecurityEventFeed } from "../components/SecurityEventFeed";
 import { SeverityBadge } from "../components/SeverityBadge";
@@ -1049,6 +1050,14 @@ export default function GcpDashboardPage() {
 
         {/* Quick actions */}
         <GcpQuickActions />
+
+        {/* Provider credentials — GCP typed schema, access-gated with the dashboard */}
+        <div
+          data-ocid="gcp.credentials.section"
+          className="provider-shell provider-tint"
+        >
+          <ProviderCredentialsForm provider={GCP} />
+        </div>
       </div>
     </Layout>
   );
